@@ -1,0 +1,1396 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../core/providers/auth_provider.dart';
+import '../../core/services/api_service.dart';
+
+class UsersScreen extends StatefulWidget {
+  const UsersScreen({super.key});
+
+  @override
+  State<UsersScreen> createState() => _UsersScreenState();
+}
+
+class _UsersScreenState extends State<UsersScreen> with TickerProviderStateMixin {
+  late TabController _tabController;
+  List<Map<String, dynamic>> _allUsers = [];
+  List<Map<String, dynamic>> _pendingUsers = [];
+  bool _isLoading = true;
+  String _searchQuery = '';
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _loadUsers();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadUsers() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      // Load all users
+      final allUsersResponse = await ApiService.getUsers();
+      // Load pending users
+      final pendingUsersResponse = await ApiService.get('/users/pending');
+
+      setState(() {
+        _allUsers = List<Map<String, dynamic>>.from(allUsersResponse['data'] ?? []);
+        _pendingUsers = List<Map<String, dynamic>>.from(pendingUsersResponse['data'] ?? []);
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  List<Map<String, dynamic>> _getFilteredUsers(List<Map<String, dynamic>> users) {
+    if (_searchQuery.isEmpty) return users;
+    
+    return users.where((user) {
+      final name = '${user['first_name']} ${user['last_name']}'.toLowerCase();
+      final email = (user['email'] ?? '').toLowerCase();
+      final query = _searchQuery.toLowerCase();
+      
+      return name.contains(query) || email.contains(query);
+    }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final authProvider = context.read<AuthProvider>();
+    
+    if (!authProvider.canManageUsers) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Users')),
+        body: const Center(
+          child: Text('You do not have permission to manage users.'),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Users'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: [
+            Tab(
+              text: 'All Users (${_allUsers.length})',
+              icon: const Icon(Icons.people),
+            ),
+            Tab(
+              text: 'Pending (${_pendingUsers.length})',
+              icon: const Icon(Icons.pending_actions),
+            ),
+          ],
+        ),
+      ),
+      body: Column(
+        children: [
+          // Search Bar
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: TextField(
+              decoration: InputDecoration(
+                hintText: 'Search users...',
+                prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                filled: true,
+                fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+              ),
+              onChanged: (value) {
+                setState(() {
+                  _searchQuery = value;
+                });
+              },
+            ),
+          ),
+          
+          // Error Message
+          if (_errorMessage != null)
+            Container(
+              margin: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.errorContainer,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _errorMessage!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    onPressed: _loadUsers,
+                  ),
+                ],
+              ),
+            ),
+          
+          // Content
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : TabBarView(
+                    controller: _tabController,
+                    children: [
+                      _buildUsersList(_getFilteredUsers(_allUsers), false),
+                      _buildUsersList(_getFilteredUsers(_pendingUsers), true),
+                    ],
+                  ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showAddUserDialog,
+        icon: const Icon(Icons.person_add),
+        label: const Text('Add User'),
+      ),
+    );
+  }
+
+  Widget _buildUsersList(List<Map<String, dynamic>> users, bool isPending) {
+    if (users.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isPending ? Icons.pending_actions : Icons.people_outline,
+              size: 64,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              isPending ? 'No pending users' : 'No users found',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              isPending 
+                  ? 'New user registrations will appear here'
+                  : 'Start by adding your first user',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadUsers,
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: users.length,
+        itemBuilder: (context, index) {
+          final user = users[index];
+          return _buildUserCard(user, isPending);
+        },
+      ),
+    );
+  }
+
+  Widget _buildUserCard(Map<String, dynamic> user, bool isPending) {
+    final name = '${user['first_name']} ${user['last_name']}';
+    final email = user['email'] ?? '';
+    final role = user['role'] ?? '';
+    final status = user['status'] ?? '';
+    
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        contentPadding: const EdgeInsets.all(16),
+        leading: CircleAvatar(
+          backgroundColor: Theme.of(context).colorScheme.primary,
+          child: Text(
+            name.isNotEmpty ? name[0].toUpperCase() : 'U',
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        title: Text(
+          name,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(email),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: _getRoleColor(role).withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    _getRoleDisplayName(role),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _getRoleColor(role),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: _getStatusColor(status).withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    status.toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _getStatusColor(status),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        trailing: PopupMenuButton<String>(
+          onSelected: (value) => _handleUserAction(value, user),
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 'view',
+              child: ListTile(
+                leading: Icon(Icons.visibility),
+                title: Text('View Details'),
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+            if (isPending) ...[
+              const PopupMenuItem(
+                value: 'approve',
+                child: ListTile(
+                  leading: Icon(Icons.check_circle, color: Colors.green),
+                  title: Text('Approve'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'reject',
+                child: ListTile(
+                  leading: Icon(Icons.cancel, color: Colors.red),
+                  title: Text('Reject'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ] else ...[
+              const PopupMenuItem(
+                value: 'edit',
+                child: ListTile(
+                  leading: Icon(Icons.edit),
+                  title: Text('Edit'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              if (status == 'active')
+                const PopupMenuItem(
+                  value: 'deactivate',
+                  child: ListTile(
+                    leading: Icon(Icons.block, color: Colors.orange),
+                    title: Text('Deactivate'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                )
+              else
+                const PopupMenuItem(
+                  value: 'activate',
+                  child: ListTile(
+                    leading: Icon(Icons.check_circle, color: Colors.green),
+                    title: Text('Activate'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              const PopupMenuItem(
+                value: 'delete',
+                child: ListTile(
+                  leading: Icon(Icons.delete, color: Colors.red),
+                  title: Text('Delete'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _getRoleColor(String role) {
+    switch (role) {
+      case 'super_admin':
+        return Colors.purple;
+      case 'branch_admin':
+        return Colors.blue;
+      case 'mc_leader':
+        return Colors.green;
+      case 'member':
+        return Colors.grey;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  String _getRoleDisplayName(String role) {
+    switch (role) {
+      case 'super_admin':
+        return 'Super Admin';
+      case 'branch_admin':
+        return 'Branch Admin';
+      case 'mc_leader':
+        return 'MC Leader';
+      case 'member':
+        return 'Member';
+      default:
+        return 'Unknown';
+    }
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'active':
+        return Colors.green;
+      case 'inactive':
+        return Colors.red;
+      case 'pending':
+        return Colors.orange;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  void _handleUserAction(String action, Map<String, dynamic> user) {
+    switch (action) {
+      case 'view':
+        _showUserDetails(user);
+        break;
+      case 'edit':
+        _showEditUserDialog(user);
+        break;
+      case 'approve':
+        _approveUser(user['id']);
+        break;
+      case 'reject':
+        _rejectUser(user['id']);
+        break;
+      case 'activate':
+      case 'deactivate':
+        _toggleUserStatus(user['id'], action == 'activate');
+        break;
+      case 'delete':
+        _showDeleteConfirmation(user);
+        break;
+    }
+  }
+
+  void _showUserDetails(Map<String, dynamic> user) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${user['first_name']} ${user['last_name']}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Email: ${user['email']}'),
+            Text('Phone: ${user['phone'] ?? 'N/A'}'),
+            Text('Role: ${_getRoleDisplayName(user['role'])}'),
+            Text('Status: ${user['status']?.toUpperCase() ?? 'N/A'}'),
+            if (user['branch_id'] != null)
+              Text('Branch ID: ${user['branch_id']}'),
+            if (user['created_at'] != null)
+              Text('Joined: ${user['created_at']}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAddUserDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => _AddUserDialog(
+        onUserCreated: () => _loadUsers(),
+      ),
+    );
+  }
+
+  void _showEditUserDialog(Map<String, dynamic> user) {
+    showDialog(
+      context: context,
+      builder: (context) => _EditUserDialog(
+        user: user,
+        onUserUpdated: () => _loadUsers(),
+      ),
+    );
+  }
+
+  Future<void> _approveUser(int userId) async {
+    try {
+      await ApiService.put('/users/$userId/approval-status', data: {'status': 'active'});
+      _loadUsers();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('User approved successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error approving user: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _rejectUser(int userId) async {
+    try {
+      await ApiService.put('/users/$userId/approval-status', data: {'status': 'rejected'});
+      _loadUsers();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('User rejected')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error rejecting user: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleUserStatus(int userId, bool activate) async {
+    try {
+      await ApiService.put('/users/$userId/approval-status', data: {
+        'status': activate ? 'active' : 'inactive'
+      });
+      _loadUsers();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('User ${activate ? 'activated' : 'deactivated'} successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error updating user status: $e')),
+        );
+      }
+    }
+  }
+
+  void _showDeleteConfirmation(Map<String, dynamic> user) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete User'),
+        content: Text('Are you sure you want to delete ${user['first_name']} ${user['last_name']}? This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _deleteUser(user['id']);
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteUser(int userId) async {
+    try {
+      await ApiService.deleteUser(userId);
+      _loadUsers();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('User deleted successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error deleting user: $e')),
+        );
+      }
+    }
+  }
+}
+
+class _AddUserDialog extends StatefulWidget {
+  final VoidCallback onUserCreated;
+
+  const _AddUserDialog({
+    required this.onUserCreated,
+  });
+
+  @override
+  State<_AddUserDialog> createState() => _AddUserDialogState();
+}
+
+class _AddUserDialogState extends State<_AddUserDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _passwordController = TextEditingController();
+  
+  String _selectedRole = 'member';
+  int? _selectedBranchId;
+  int? _selectedMCId;
+  String? _selectedGender;
+  DateTime? _birthDate;
+  
+  List<Map<String, dynamic>> _branches = [];
+  List<Map<String, dynamic>> _mcs = [];
+  
+  bool _isLoading = false;
+  bool _obscurePassword = true;
+
+  final List<String> _roles = ['member', 'mc_leader', 'branch_admin', 'super_admin'];
+  final List<String> _genders = ['male', 'female'];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBranches();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadBranches() async {
+    try {
+      final response = await ApiService.get('/branches');
+      setState(() {
+        _branches = List<Map<String, dynamic>>.from(response['data'] ?? []);
+      });
+    } catch (e) {
+      // Handle error silently
+    }
+  }
+
+  Future<void> _loadMCs() async {
+    if (_selectedBranchId == null) return;
+    
+    try {
+      final response = await ApiService.get('/branches/$_selectedBranchId/mcs');
+      setState(() {
+        _mcs = List<Map<String, dynamic>>.from(response['data'] ?? []);
+        _selectedMCId = null; // Reset MC selection
+      });
+    } catch (e) {
+      // Handle error silently
+    }
+  }
+
+  Future<void> _createUser() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final userData = {
+        'name': _nameController.text.trim(),
+        'email': _emailController.text.trim(),
+        'password': _passwordController.text,
+        'phone_number': _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
+        'role': _selectedRole,
+        'branch_id': _selectedBranchId,
+        'mc_id': _selectedMCId,
+        'gender': _selectedGender,
+        'birth_date': _birthDate?.toIso8601String().split('T')[0],
+      };
+
+      await ApiService.post('/users', data: userData);
+      
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('User created successfully')),
+        );
+        widget.onUserCreated();
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error creating user: $e'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    }
+  }
+
+  String _getRoleDisplayName(String role) {
+    switch (role) {
+      case 'super_admin':
+        return 'Super Admin';
+      case 'branch_admin':
+        return 'Branch Admin';
+      case 'mc_leader':
+        return 'MC Leader';
+      case 'member':
+        return 'Member';
+      default:
+        return role.replaceAll('_', ' ').split(' ').map((word) => 
+          word[0].toUpperCase() + word.substring(1)).join(' ');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.person_add, 
+                    color: Theme.of(context).colorScheme.onPrimaryContainer),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Add New User',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onPrimaryContainer,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
+                ],
+              ),
+            ),
+
+            // Form
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Name Field
+                      TextFormField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Full Name *',
+                          prefixIcon: Icon(Icons.person),
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Please enter the full name';
+                          }
+                          if (value.trim().length < 2) {
+                            return 'Name must be at least 2 characters';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Email Field
+                      TextFormField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: const InputDecoration(
+                          labelText: 'Email Address *',
+                          prefixIcon: Icon(Icons.email),
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Please enter an email address';
+                          }
+                          if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value.trim())) {
+                            return 'Please enter a valid email address';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Phone Field
+                      TextFormField(
+                        controller: _phoneController,
+                        keyboardType: TextInputType.phone,
+                        decoration: const InputDecoration(
+                          labelText: 'Phone Number',
+                          prefixIcon: Icon(Icons.phone),
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Password Field
+                      TextFormField(
+                        controller: _passwordController,
+                        obscureText: _obscurePassword,
+                        decoration: InputDecoration(
+                          labelText: 'Password *',
+                          prefixIcon: const Icon(Icons.lock),
+                          suffixIcon: IconButton(
+                            icon: Icon(_obscurePassword ? Icons.visibility : Icons.visibility_off),
+                            onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                          ),
+                          border: const OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter a password';
+                          }
+                          if (value.length < 6) {
+                            return 'Password must be at least 6 characters';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Role Dropdown
+                      DropdownButtonFormField<String>(
+                        initialinitialValue: _selectedRole,
+                        decoration: const InputDecoration(
+                          labelText: 'Role *',
+                          prefixIcon: Icon(Icons.admin_panel_settings),
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _roles.map((role) => DropdownMenuItem(
+                          value: role,
+                          child: Text(_getRoleDisplayName(role)),
+                        )).toList(),
+                        onChanged: (value) => setState(() => _selectedRole = value!),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Gender Dropdown
+                      DropdownButtonFormField<String>(
+                        initialValue: _selectedGender,
+                        decoration: const InputDecoration(
+                          labelText: 'Gender',
+                          prefixIcon: Icon(Icons.person_outline),
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          const DropdownMenuItem(value: null, child: Text('Select Gender')),
+                          ..._genders.map((gender) => DropdownMenuItem(
+                            value: gender,
+                            child: Text(gender[0].toUpperCase() + gender.substring(1)),
+                          )),
+                        ],
+                        onChanged: (value) => setState(() => _selectedGender = value),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Birth Date Field
+                      InkWell(
+                        onTap: () async {
+                          final date = await showDatePicker(
+                            context: context,
+                            initialDate: DateTime.now().subtract(const Duration(days: 365 * 18)),
+                            firstDate: DateTime(1920),
+                            lastDate: DateTime.now(),
+                          );
+                          if (date != null) {
+                            setState(() => _birthDate = date);
+                          }
+                        },
+                        child: InputDecorator(
+                          decoration: const InputDecoration(
+                            labelText: 'Birth Date',
+                            prefixIcon: Icon(Icons.calendar_today),
+                            border: OutlineInputBorder(),
+                          ),
+                          child: Text(
+                            _birthDate != null
+                                ? '${_birthDate!.day}/${_birthDate!.month}/${_birthDate!.year}'
+                                : 'Select birth date',
+                            style: TextStyle(
+                              color: _birthDate != null 
+                                  ? Theme.of(context).textTheme.bodyLarge?.color
+                                  : Theme.of(context).hintColor,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Branch Dropdown
+                      DropdownButtonFormField<int>(
+                        initialValue: _selectedBranchId,
+                        decoration: const InputDecoration(
+                          labelText: 'Branch',
+                          prefixIcon: Icon(Icons.location_city),
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          const DropdownMenuItem(value: null, child: Text('Select Branch')),
+                          ..._branches.map((branch) => DropdownMenuItem(
+                            value: branch['id'] as int,
+                            child: Text(branch['name'] ?? 'Unknown Branch'),
+                          )),
+                        ],
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedBranchId = value;
+                            _selectedMCId = null;
+                          });
+                          if (value != null) {
+                            _loadMCs();
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      // MC Dropdown
+                      DropdownButtonFormField<int>(
+                        initialValue: _selectedMCId,
+                        decoration: const InputDecoration(
+                          labelText: 'Missional Community',
+                          prefixIcon: Icon(Icons.groups),
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          const DropdownMenuItem(value: null, child: Text('Select MC')),
+                          ..._mcs.map((mc) => DropdownMenuItem(
+                            value: mc['id'] as int,
+                            child: Text(mc['name'] ?? 'Unknown MC'),
+                          )),
+                        ],
+                        onChanged: _selectedBranchId == null 
+                            ? null 
+                            : (value) => setState(() => _selectedMCId = value),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // Actions
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _isLoading ? null : _createUser,
+                      child: _isLoading 
+                          ? const SizedBox(
+                              height: 16,
+                              width: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Create User'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EditUserDialog extends StatefulWidget {
+  final Map<String, dynamic> user;
+  final VoidCallback onUserUpdated;
+
+  const _EditUserDialog({
+    required this.user,
+    required this.onUserUpdated,
+  });
+
+  @override
+  State<_EditUserDialog> createState() => _EditUserDialogState();
+}
+
+class _EditUserDialogState extends State<_EditUserDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameController;
+  late final TextEditingController _emailController;
+  late final TextEditingController _phoneController;
+  
+  late String _selectedRole;
+  int? _selectedBranchId;
+  int? _selectedMCId;
+  String? _selectedGender;
+  DateTime? _birthDate;
+  
+  List<Map<String, dynamic>> _branches = [];
+  List<Map<String, dynamic>> _mcs = [];
+  
+  bool _isLoading = false;
+
+  final List<String> _roles = ['member', 'mc_leader', 'branch_admin', 'super_admin'];
+  final List<String> _genders = ['male', 'female'];
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeControllers();
+    _loadBranches();
+  }
+
+  void _initializeControllers() {
+    // Handle both 'name' field and 'first_name'/'last_name' fields
+    String fullName = '';
+    if (widget.user['name'] != null) {
+      fullName = widget.user['name'];
+    } else if (widget.user['first_name'] != null || widget.user['last_name'] != null) {
+      fullName = '${widget.user['first_name'] ?? ''} ${widget.user['last_name'] ?? ''}'.trim();
+    }
+    
+    _nameController = TextEditingController(text: fullName);
+    _emailController = TextEditingController(text: widget.user['email'] ?? '');
+    _phoneController = TextEditingController(text: widget.user['phone_number'] ?? widget.user['phone'] ?? '');
+    
+    _selectedRole = widget.user['role'] ?? 'member';
+    _selectedBranchId = widget.user['branch_id'] as int?;
+    _selectedMCId = widget.user['mc_id'] as int?;
+    _selectedGender = widget.user['gender'] as String?;
+    
+    if (widget.user['birth_date'] != null) {
+      try {
+        _birthDate = DateTime.parse(widget.user['birth_date']);
+      } catch (e) {
+        // Handle parsing error
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadBranches() async {
+    try {
+      final response = await ApiService.get('/branches');
+      setState(() {
+        _branches = List<Map<String, dynamic>>.from(response['data'] ?? []);
+      });
+      if (_selectedBranchId != null) {
+        _loadMCs();
+      }
+    } catch (e) {
+      // Handle error silently
+    }
+  }
+
+  Future<void> _loadMCs() async {
+    if (_selectedBranchId == null) return;
+    
+    try {
+      final response = await ApiService.get('/branches/$_selectedBranchId/mcs');
+      setState(() {
+        _mcs = List<Map<String, dynamic>>.from(response['data'] ?? []);
+      });
+    } catch (e) {
+      // Handle error silently
+    }
+  }
+
+  Future<void> _updateUser() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final userData = {
+        'name': _nameController.text.trim(),
+        'email': _emailController.text.trim(),
+        'phone_number': _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
+        'role': _selectedRole,
+        'branch_id': _selectedBranchId,
+        'mc_id': _selectedMCId,
+        'gender': _selectedGender,
+        'birth_date': _birthDate?.toIso8601String().split('T')[0],
+      };
+
+      await ApiService.put('/users/${widget.user['id']}', data: userData);
+      
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('User updated successfully')),
+        );
+        widget.onUserUpdated();
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating user: $e'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    }
+  }
+
+  String _getRoleDisplayName(String role) {
+    switch (role) {
+      case 'super_admin':
+        return 'Super Admin';
+      case 'branch_admin':
+        return 'Branch Admin';
+      case 'mc_leader':
+        return 'MC Leader';
+      case 'member':
+        return 'Member';
+      default:
+        return role.replaceAll('_', ' ').split(' ').map((word) => 
+          word[0].toUpperCase() + word.substring(1)).join(' ');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.secondaryContainer,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.edit, 
+                    color: Theme.of(context).colorScheme.onSecondaryContainer),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Edit User',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSecondaryContainer,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                    color: Theme.of(context).colorScheme.onSecondaryContainer,
+                  ),
+                ],
+              ),
+            ),
+
+            // Form
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Name Field
+                      TextFormField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Full Name *',
+                          prefixIcon: Icon(Icons.person),
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Please enter the full name';
+                          }
+                          if (value.trim().length < 2) {
+                            return 'Name must be at least 2 characters';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Email Field
+                      TextFormField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: const InputDecoration(
+                          labelText: 'Email Address *',
+                          prefixIcon: Icon(Icons.email),
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Please enter an email address';
+                          }
+                          if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value.trim())) {
+                            return 'Please enter a valid email address';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Phone Field
+                      TextFormField(
+                        controller: _phoneController,
+                        keyboardType: TextInputType.phone,
+                        decoration: const InputDecoration(
+                          labelText: 'Phone Number',
+                          prefixIcon: Icon(Icons.phone),
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Role Dropdown
+                      DropdownButtonFormField<String>(
+                        initialValue: _selectedRole,
+                        decoration: const InputDecoration(
+                          labelText: 'Role *',
+                          prefixIcon: Icon(Icons.admin_panel_settings),
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _roles.map((role) => DropdownMenuItem(
+                          value: role,
+                          child: Text(_getRoleDisplayName(role)),
+                        )).toList(),
+                        onChanged: (value) => setState(() => _selectedRole = value!),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Gender Dropdown
+                      DropdownButtonFormField<String>(
+                        initialValue: _selectedGender,
+                        decoration: const InputDecoration(
+                          labelText: 'Gender',
+                          prefixIcon: Icon(Icons.person_outline),
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          const DropdownMenuItem(value: null, child: Text('Select Gender')),
+                          ..._genders.map((gender) => DropdownMenuItem(
+                            value: gender,
+                            child: Text(gender[0].toUpperCase() + gender.substring(1)),
+                          )),
+                        ],
+                        onChanged: (value) => setState(() => _selectedGender = value),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Birth Date Field
+                      InkWell(
+                        onTap: () async {
+                          final date = await showDatePicker(
+                            context: context,
+                            initialDate: _birthDate ?? DateTime.now().subtract(const Duration(days: 365 * 18)),
+                            firstDate: DateTime(1920),
+                            lastDate: DateTime.now(),
+                          );
+                          if (date != null) {
+                            setState(() => _birthDate = date);
+                          }
+                        },
+                        child: InputDecorator(
+                          decoration: const InputDecoration(
+                            labelText: 'Birth Date',
+                            prefixIcon: Icon(Icons.calendar_today),
+                            border: OutlineInputBorder(),
+                          ),
+                          child: Text(
+                            _birthDate != null
+                                ? '${_birthDate!.day}/${_birthDate!.month}/${_birthDate!.year}'
+                                : 'Select birth date',
+                            style: TextStyle(
+                              color: _birthDate != null 
+                                  ? Theme.of(context).textTheme.bodyLarge?.color
+                                  : Theme.of(context).hintColor,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Branch Dropdown
+                      DropdownButtonFormField<int>(
+                        initialValue: _selectedBranchId,
+                        decoration: const InputDecoration(
+                          labelText: 'Branch',
+                          prefixIcon: Icon(Icons.location_city),
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          const DropdownMenuItem(value: null, child: Text('Select Branch')),
+                          ..._branches.map((branch) => DropdownMenuItem(
+                            value: branch['id'] as int,
+                            child: Text(branch['name'] ?? 'Unknown Branch'),
+                          )),
+                        ],
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedBranchId = value;
+                            _selectedMCId = null;
+                          });
+                          if (value != null) {
+                            _loadMCs();
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      // MC Dropdown
+                      DropdownButtonFormField<int>(
+                        initialValue: _selectedMCId,
+                        decoration: const InputDecoration(
+                          labelText: 'Missional Community',
+                          prefixIcon: Icon(Icons.groups),
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          const DropdownMenuItem(value: null, child: Text('Select MC')),
+                          ..._mcs.map((mc) => DropdownMenuItem(
+                            value: mc['id'] as int,
+                            child: Text(mc['name'] ?? 'Unknown MC'),
+                          )),
+                        ],
+                        onChanged: _selectedBranchId == null 
+                            ? null 
+                            : (value) => setState(() => _selectedMCId = value),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // Actions
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _isLoading ? null : _updateUser,
+                      child: _isLoading 
+                          ? const SizedBox(
+                              height: 16,
+                              width: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Update User'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

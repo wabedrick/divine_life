@@ -1,0 +1,104 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Run Flutter App",
+            "type": "shell",
+            "command": "flutter",
+            "args": [
+                "run"
+            ],
+            "group": "build",
+            "isBackground": true,
+            "options": {
+                "cwd": "${workspaceFolder}/flutter_app"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            }
+        },
+        {
+            "label": "Run Laravel Backend",
+            "type": "shell",
+            "command": "php",
+            "args": [
+                "artisan",
+                "serve",
+                "--host=0.0.0.0",
+                "--port=8000"
+            ],
+            "group": "build",
+            "isBackground": true,
+            "options": {
+                "cwd": "${workspaceFolder}/backend"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            }
+        },
+        {
+            "label": "Run Both Apps",
+            "dependsOrder": "parallel",
+            "dependsOn": [
+                "Run Flutter App",
+                "Run Laravel Backend"
+            ],
+            "group": "build"
+        },
+        {
+            "label": "Flutter: Build APK",
+            "type": "shell",
+            "command": "flutter",
+            "args": [
+                "build",
+                "apk"
+            ],
+            "group": "build",
+            "options": {
+                "cwd": "${workspaceFolder}/flutter_app"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Laravel: Run Migrations",
+            "type": "shell",
+            "command": "php",
+            "args": [
+                "artisan",
+                "migrate"
+            ],
+            "group": "build",
+            "options": {
+                "cwd": "${workspaceFolder}/backend"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Laravel: Fresh Migration with Seed",
+            "type": "shell",
+            "command": "php",
+            "args": [
+                "artisan",
+                "migrate:fresh",
+                "--seed"
+            ],
+            "group": "build",
+            "options": {
+                "cwd": "${workspaceFolder}/backend"
+            },
+            "problemMatcher": []
+        }
+    ]
+}
