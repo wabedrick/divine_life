@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/models/chat_models.dart';
 import '../../core/providers/chat_provider.dart';
 import '../../core/providers/auth_provider.dart';
+import '../../core/services/api_service.dart';
 
 import '../../shared/widgets/loading_widget.dart';
 import '../../shared/widgets/error_widget.dart' as custom;
@@ -552,17 +553,324 @@ class _ChatListScreenState extends State<ChatListScreen>
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     // Members are not allowed to create chats
     if (authProvider.isMember) return const SizedBox.shrink();
-
     return FloatingActionButton(
-      onPressed: () {
-        // Temporarily disabled for non-members too (feature gated)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Chat creation coming soon!')),
-        );
-      },
+      onPressed: () => _showCreateChatOptions(),
       backgroundColor: const Color(0xFF25D366),
-      child: const Icon(Icons.message, color: Colors.white),
+      child: const Icon(Icons.add, color: Colors.white),
     );
+  }
+
+  void _showCreateChatOptions() {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+    // Capture messenger early to avoid using BuildContext across async gaps
+    final messenger0 = ScaffoldMessenger.of(context);
+
+    if (authProvider.isSuperAdmin) {
+      // Show options for Super Admin: Announcement, Branch chat, MC chat
+      showModalBottomSheet(
+        context: context,
+        builder: (ctx) => Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.campaign),
+              title: const Text('Create global announcement chat'),
+              onTap: () async {
+                Navigator.of(ctx).pop();
+                // Prompt for a name/description
+                final result = await showDialog<Map<String, String>>(
+                  context: context,
+                  builder: (dCtx) {
+                    final nameCtrl = TextEditingController(
+                      text: 'Announcements',
+                    );
+                    final descCtrl = TextEditingController(
+                      text: 'Official announcements to all users',
+                    );
+                    return AlertDialog(
+                      title: const Text('Create Announcement Chat'),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextField(
+                            controller: nameCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Name',
+                            ),
+                          ),
+                          TextField(
+                            controller: descCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Description',
+                            ),
+                          ),
+                        ],
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(dCtx).pop(),
+                          child: const Text('Cancel'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.of(dCtx).pop({
+                            'name': nameCtrl.text,
+                            'description': descCtrl.text,
+                          }),
+                          child: const Text('Create'),
+                        ),
+                      ],
+                    );
+                  },
+                );
+
+                if (result != null) {
+                  final created = await chatProvider.createConversation(
+                    name: result['name'] ?? 'Announcements',
+                    description: result['description'],
+                    type: ConversationType.announcement,
+                  );
+                  if (created != null) {
+                    messenger0.showSnackBar(
+                      const SnackBar(
+                        content: Text('Announcement chat created'),
+                      ),
+                    );
+                  } else {
+                    messenger0.showSnackBar(
+                      const SnackBar(
+                        content: Text('Failed to create announcement chat'),
+                      ),
+                    );
+                  }
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.business),
+              title: const Text('Create branch chat'),
+              onTap: () async {
+                Navigator.of(ctx).pop();
+                // Let super admin pick a branch
+                final branchesResp = await ApiService.getBranches();
+                final branches =
+                    (branchesResp['data'] as List?)
+                        ?.cast<Map<String, dynamic>>() ??
+                    [];
+
+                final choice = await showDialog<int?>(
+                  context: context,
+                  builder: (dCtx) {
+                    int? selected;
+                    return StatefulBuilder(
+                      builder: (sCtx, setState) => AlertDialog(
+                        title: const Text('Select Branch'),
+                        content: SizedBox(
+                          width: double.maxFinite,
+                          child: branches.isEmpty
+                              ? const Center(
+                                  child: Text('No branches available'),
+                                )
+                              : ListView.builder(
+                                  shrinkWrap: true,
+                                  itemCount: branches.length,
+                                  itemBuilder: (context, index) {
+                                    final b = branches[index];
+                                    final int bid = b['id'] as int;
+                                    final name = b['name'] ?? 'Branch';
+                                    return ListTile(
+                                      title: Text(name),
+                                      leading: Icon(
+                                        selected == bid
+                                            ? Icons.radio_button_checked
+                                            : Icons.radio_button_off_outlined,
+                                        color: selected == bid
+                                            ? Theme.of(context).colorScheme.primary
+                                            : Theme.of(context).iconTheme.color,
+                                      ),
+                                      onTap: () => setState(() => selected = bid),
+                                    );
+                                  },
+                                ),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(dCtx).pop(),
+                            child: const Text('Cancel'),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.of(dCtx).pop(selected),
+                            child: const Text('Open'),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+
+                if (choice != null) {
+                  final conv = await chatProvider.getOrCreateCategoryConversation(
+                    type: ConversationType.branch,
+                    categoryId: choice,
+                  );
+                  if (!mounted) return;
+                  if (conv != null) {
+                    messenger0.showSnackBar(
+                      const SnackBar(content: Text('Branch chat ready')),
+                    );
+                  }
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.church),
+              title: const Text('Create MC chat'),
+              onTap: () async {
+                Navigator.of(ctx).pop();
+                final mcsResp = await ApiService.getMCs();
+                final mcs =
+                    (mcsResp['data'] as List?)?.cast<Map<String, dynamic>>() ??
+                    [];
+
+                final choice = await showDialog<int?>(
+                  context: context,
+                  builder: (dCtx) {
+                    int? selected;
+                    return StatefulBuilder(
+                      builder: (sCtx, setState) => AlertDialog(
+                        title: const Text('Select MC'),
+                        content: SizedBox(
+                          width: double.maxFinite,
+                          child: mcs.isEmpty
+                              ? const Center(child: Text('No MCs available'))
+                              : ListView.builder(
+                                  shrinkWrap: true,
+                                  itemCount: mcs.length,
+                                  itemBuilder: (context, index) {
+                                    final m = mcs[index];
+                                    final int mid = m['id'] as int;
+                                    final name = m['name'] ?? 'MC';
+                                    return ListTile(
+                                      title: Text(name),
+                                      leading: Icon(
+                                        selected == mid
+                                            ? Icons.radio_button_checked
+                                            : Icons.radio_button_off_outlined,
+                                        color: selected == mid
+                                            ? Theme.of(context).colorScheme.primary
+                                            : Theme.of(context).iconTheme.color,
+                                      ),
+                                      onTap: () => setState(() => selected = mid),
+                                    );
+                                  },
+                                ),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(dCtx).pop(),
+                            child: const Text('Cancel'),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.of(dCtx).pop(selected),
+                            child: const Text('Open'),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+
+                if (choice != null) {
+                  final conv = await chatProvider.getOrCreateCategoryConversation(
+                    type: ConversationType.mc,
+                    categoryId: choice,
+                  );
+                  if (!mounted) return;
+                  if (conv != null) {
+                    messenger0.showSnackBar(
+                      const SnackBar(content: Text('MC chat ready')),
+                    );
+                  }
+                }
+              },
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // Branch admins: open or create branch conversation for their branch
+    if (authProvider.isBranchAdmin) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Open Branch Chat'),
+          content: const Text('Open or create a chat for your branch'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                final messenger = ScaffoldMessenger.of(context);
+                final conv = await chatProvider.getOrCreateCategoryConversation(
+                  type: ConversationType.branch,
+                  categoryId: authProvider.userBranchId!,
+                );
+                if (!mounted) return;
+                if (conv != null) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Branch chat ready')),
+                  );
+                }
+              },
+              child: const Text('Open'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // MC leaders: open or create MC conversation for their MC
+    if (authProvider.isMCLeader) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Open MC Chat'),
+          content: const Text(
+            'Open or create a chat for your Missional Community',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                final messenger = ScaffoldMessenger.of(context);
+                final conv = await chatProvider.getOrCreateCategoryConversation(
+                  type: ConversationType.mc,
+                  categoryId: authProvider.userMCId!,
+                );
+                if (!mounted) return;
+                if (conv != null) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('MC chat ready')),
+                  );
+                }
+              },
+              child: const Text('Open'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
   }
 
   String _formatLastMessage(Message message) {

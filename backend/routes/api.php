@@ -6,11 +6,13 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\MCController;
 use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\BranchReportController;
 use App\Http\Controllers\Api\EventController;
 use App\Http\Controllers\Api\AnnouncementController;
 use App\Http\Controllers\Api\ChatController;
 use App\Http\Controllers\Api\SermonController;
 use App\Http\Controllers\Api\SocialMediaPostController;
+use App\Http\Controllers\Api\BirthdayController;
 
 Route::get('/user', function (Request $request) {
     return $request->user();
@@ -73,7 +75,7 @@ Route::middleware('auth:api')->group(function () {
     Route::post('branches/{branch}/assign-user', [\App\Http\Controllers\Api\BranchController::class, 'assignUser']);
     Route::get('branches/{branch}/statistics', [\App\Http\Controllers\Api\BranchController::class, 'getStatistics']);
 
-    // Weekly Reports routes
+    // MC Reports routes (weekly reports by MC leaders)
     Route::get('reports', [\App\Http\Controllers\Api\ReportController::class, 'index']);
     Route::get('reports/pending', [\App\Http\Controllers\Api\ReportController::class, 'pending']);
     Route::get('reports/statistics', [\App\Http\Controllers\Api\ReportController::class, 'statistics']);
@@ -83,6 +85,19 @@ Route::middleware('auth:api')->group(function () {
     Route::delete('reports/{report}', [\App\Http\Controllers\Api\ReportController::class, 'destroy']);
     Route::post('reports/{report}/approve', [\App\Http\Controllers\Api\ReportController::class, 'approve']);
     Route::post('reports/{report}/reject', [\App\Http\Controllers\Api\ReportController::class, 'reject']);
+
+    // Branch Reports routes (aggregated reports by branch admins)
+    Route::get('branch-reports', [\App\Http\Controllers\Api\BranchReportController::class, 'index']);
+    Route::get('branch-reports/aggregated-stats', [\App\Http\Controllers\Api\BranchReportController::class, 'getAggregatedMCStats']);
+    Route::post('branch-reports/generate-automated', [\App\Http\Controllers\Api\BranchReportController::class, 'generateAutomatedReports']);
+    Route::get('branch-reports/pending-automated', [\App\Http\Controllers\Api\BranchReportController::class, 'getPendingAutomatedReports']);
+    Route::get('branch-reports/pending-for-branch', [\App\Http\Controllers\Api\BranchReportController::class, 'getPendingForBranch']);
+    Route::post('branch-reports/{branchReport}/send-to-super-admin', [\App\Http\Controllers\Api\BranchReportController::class, 'sendToSuperAdmin']);
+    Route::post('branch-reports/{branchReport}/mark-sent', [\App\Http\Controllers\Api\BranchReportController::class, 'markAsSent']);
+    Route::get('branch-reports/{branchReport}', [\App\Http\Controllers\Api\BranchReportController::class, 'show']);
+    Route::post('branch-reports', [\App\Http\Controllers\Api\BranchReportController::class, 'store']);
+    Route::put('branch-reports/{branchReport}', [\App\Http\Controllers\Api\BranchReportController::class, 'update']);
+    Route::delete('branch-reports/{branchReport}', [\App\Http\Controllers\Api\BranchReportController::class, 'destroy']);
 
     // Events routes
     Route::get('events', [\App\Http\Controllers\Api\EventController::class, 'index']);
@@ -110,6 +125,8 @@ Route::middleware('auth:api')->group(function () {
         Route::get('conversations', [\App\Http\Controllers\Api\ChatController::class, 'getConversations']);
         Route::get('conversations/{conversationId}/messages', [\App\Http\Controllers\Api\ChatController::class, 'getMessages']);
         Route::post('messages', [\App\Http\Controllers\Api\ChatController::class, 'sendMessage']);
+        Route::put('messages/{id}', [\App\Http\Controllers\Api\ChatController::class, 'updateMessage']);
+        Route::delete('messages/{id}', [\App\Http\Controllers\Api\ChatController::class, 'deleteMessage']);
         Route::post('conversations', [\App\Http\Controllers\Api\ChatController::class, 'createConversation']);
         Route::post('conversations/category', [\App\Http\Controllers\Api\ChatController::class, 'getOrCreateCategoryConversation']);
     });
@@ -139,5 +156,12 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/', [SocialMediaPostController::class, 'store']);
         Route::put('{id}', [SocialMediaPostController::class, 'update']);
         Route::delete('{id}', [SocialMediaPostController::class, 'destroy']);
+    });
+
+    // Birthday notification routes
+    Route::prefix('birthdays')->group(function () {
+        Route::get('notifications', [BirthdayController::class, 'getBirthdayNotifications']);
+        Route::get('upcoming', [BirthdayController::class, 'getUpcomingBirthdays']);
+        Route::post('acknowledge', [BirthdayController::class, 'acknowledgeBirthday']);
     });
 });

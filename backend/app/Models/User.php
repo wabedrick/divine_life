@@ -171,4 +171,45 @@ class User extends Authenticatable implements JWTSubject
     {
         return $this->role === 'member';
     }
+
+    /**
+     * Check if today is user's birthday
+     */
+    public function isBirthdayToday(): bool
+    {
+        if (!$this->birth_date) {
+            return false;
+        }
+
+        $today = now();
+        $birthDate = \Carbon\Carbon::parse($this->birth_date);
+
+        return $today->month === $birthDate->month && $today->day === $birthDate->day;
+    }
+
+    /**
+     * Get users with birthdays today for MC leaders
+     */
+    public static function getBirthdaysForMCLeader(int $mcId): \Illuminate\Database\Eloquent\Collection
+    {
+        return self::where('mc_id', $mcId)
+            ->whereNotNull('birth_date')
+            ->get()
+            ->filter(function ($user) {
+                return $user->isBirthdayToday();
+            });
+    }
+
+    /**
+     * Get users with birthdays today for Branch admins
+     */
+    public static function getBirthdaysForBranchAdmin(int $branchId): \Illuminate\Database\Eloquent\Collection
+    {
+        return self::where('branch_id', $branchId)
+            ->whereNotNull('birth_date')
+            ->get()
+            ->filter(function ($user) {
+                return $user->isBirthdayToday();
+            });
+    }
 }

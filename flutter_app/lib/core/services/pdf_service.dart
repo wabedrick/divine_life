@@ -206,12 +206,12 @@ class PDFService {
                     if (report['offerings'] != null)
                       _buildTableRow(
                         'Weekly Offerings:',
-                        '\$${report['offerings']}',
+                        'UGX ${report['offerings']}',
                       ),
                     if (report['total_offerings'] != null)
                       _buildTableRow(
                         'Total Offerings:',
-                        '\$${report['total_offerings']}',
+                        'UGX ${report['total_offerings']}',
                       ),
                   ],
                 ),
@@ -317,7 +317,10 @@ class PDFService {
               stats['total_attendance'].toString(),
             ),
           if (stats['total_offerings'] != null)
-            _buildTableRow('Total Offerings:', '\$${stats['total_offerings']}'),
+            _buildTableRow(
+              'Total Offerings:',
+              'UGX ${stats['total_offerings']}',
+            ),
           if (stats['average_attendance'] != null)
             _buildTableRow(
               'Average Attendance:',
@@ -463,7 +466,7 @@ class PDFService {
               if (stats['total_offerings'] != null)
                 _buildTableRow(
                   'Total Monthly Offerings:',
-                  '\$${stats['total_offerings']}',
+                  'UGX ${stats['total_offerings']}',
                 ),
             ],
           ],
@@ -520,7 +523,7 @@ class PDFService {
                   pw.Text('MC: ${report['mc_name'] ?? 'N/A'}'),
                   pw.Text('Members Met: ${report['members_met'] ?? 'N/A'}'),
                   if (report['offerings'] != null)
-                    pw.Text('Offerings: \$${report['offerings']}'),
+                    pw.Text('Offerings: UGX ${report['offerings']}'),
                 ],
               ),
             ),

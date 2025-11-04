@@ -27,6 +27,15 @@ class AuthService {
 
         // Save tokens
         await StorageService.saveAuthToken(token);
+        // If backend provided a refresh token on login, persist it too
+        if (response['refresh_token'] != null) {
+          await StorageService.saveRefreshToken(response['refresh_token']);
+        } else if (response['data'] is Map &&
+            response['data']['refresh_token'] != null) {
+          await StorageService.saveRefreshToken(
+            response['data']['refresh_token'],
+          );
+        }
 
         // Save user data
         await StorageService.saveUserData(user);
@@ -168,9 +177,8 @@ class AuthService {
 
   static bool canApproveReports() {
     final role = getCurrentUserRole();
-    return role == roleSuperAdmin ||
-        role == roleBranchAdmin ||
-        role == roleMCLeader;
+    return role == roleSuperAdmin || role == roleBranchAdmin;
+    // MC Leaders can only submit reports, not approve them
   }
 
   static bool canManageEvents() {

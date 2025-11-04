@@ -304,8 +304,9 @@ class ChatService {
     String? fileName,
     int? fileSize,
     String? replyToId,
+    String? clientId,
   }) async {
-    final messageId = _uuid.v4();
+    final messageId = clientId ?? _uuid.v4();
     final currentUserId = AuthService.getCurrentUserId();
 
     if (currentUserId == null) {
@@ -357,6 +358,9 @@ class ChatService {
             if (fileName != null) 'file_name': fileName,
             if (fileSize != null) 'file_size': fileSize,
             if (replyToId != null) 'reply_to_id': replyToId,
+            // Include client-generated id so backend can echo it back and
+            // other clients can deduplicate.
+            if (clientId != null) 'client_id': clientId,
           },
         );
         final serverMessage = Message.fromJson(response['data']);
@@ -390,6 +394,98 @@ class ChatService {
       }
     } catch (e) {
       _logger.e('Failed to send message: $e');
+      rethrow;
+    }
+  }
+
+  /// Fetch comments (replies) for a specific message within a conversation.
+  /// Uses the existing messages endpoint with the `reply_to_id` filter so the
+  /// backend doesn't need a separate comments API. Returns an empty list on
+  /// failure.
+  static Future<List<Message>> getComments({
+    required int conversationId,
+    required String messageId,
+  }) async {
+    try {
+      final response = await ApiService.get(
+        '/chat/conversations/$conversationId/messages',
+        queryParameters: {'reply_to_id': messageId, 'limit': '100'},
+      );
+
+      final messages = (response['data'] as List)
+          .map((m) => Message.fromJson(m))
+          .toList();
+
+      return messages;
+    } catch (e) {
+      _logger.e('Failed to fetch comments for message $messageId: $e');
+      return [];
+    }
+  }
+
+  /// Attempt to get a comment count for a message. Backend may expose a
+  /// lightweight endpoint at `/chat/messages/{id}/comments/count`. If that
+  /// endpoint is not available, fall back to fetching the comments and
+  /// returning the list length.
+  static Future<int> getCommentCount({
+    required int conversationId,
+    required String messageId,
+  }) async {
+    try {
+      final response = await ApiService.get(
+        '/chat/messages/$messageId/comments/count',
+      );
+      if (response['count'] != null) {
+        return int.tryParse(response['count'].toString()) ?? 0;
+      }
+    } catch (e) {
+      _logger.i(
+        'Comments count endpoint not available, falling back to list fetch: $e',
+      );
+    }
+
+    // Fallback: fetch comments and return their length
+    try {
+      final comments = await getComments(
+        conversationId: conversationId,
+        messageId: messageId,
+      );
+      return comments.length;
+    } catch (e) {
+      _logger.e('Failed to fetch comments for count fallback: $e');
+      return 0;
+    }
+  }
+
+  /// Edit an existing message's content
+  static Future<Message> editMessage({
+    required String messageId,
+    required String content,
+  }) async {
+    try {
+      final response = await ApiService.put(
+        '/chat/messages/$messageId',
+        data: {'content': content},
+      );
+
+      final serverMessage = Message.fromJson(response['data']);
+
+      // Update cache if present
+      final convId = serverMessage.conversationId;
+      final messages = _cachedMessages[convId];
+      if (messages != null) {
+        final idx = messages.indexWhere((m) => m.id == serverMessage.id);
+        if (idx != -1) {
+          messages[idx] = serverMessage;
+        }
+      }
+
+      // Emit updated message
+      _messageController.add(serverMessage);
+
+      return serverMessage;
+    } catch (e) {
+      _logger.e('Failed to edit message: $e');
       rethrow;
     }
   }
@@ -552,18 +648,22 @@ class ChatService {
   /// Create new conversation
   static Future<Conversation> createConversation({
     required String name,
-    required List<int> participantIds,
+    List<int>? participantIds,
     ConversationType type = ConversationType.group,
     String? description,
+    int? branchId,
+    int? mcId,
   }) async {
     try {
       final response = await ApiService.post(
         '/chat/conversations',
         data: {
           'name': name,
-          'participant_ids': participantIds,
+          if (participantIds != null) 'participant_ids': participantIds,
           'type': type.name,
           'description': description,
+          if (branchId != null) 'branch_id': branchId,
+          if (mcId != null) 'mc_id': mcId,
         },
       );
 

@@ -4,6 +4,7 @@ import '../services/api_service.dart';
 import '../services/sermon_service.dart';
 import '../models/announcement_model.dart';
 import '../models/sermon.dart';
+import '../models/social_media_post.dart';
 import 'auth_provider.dart';
 
 class DashboardProvider extends ChangeNotifier {
@@ -20,10 +21,12 @@ class DashboardProvider extends ChangeNotifier {
   Map<String, dynamic>? _reportStatistics;
   int _totalBranches = 0;
   int _totalMCs = 0;
+  int _totalMCMembers = 0;
   int _totalEvents = 0;
   int _totalAnnouncements = 0;
   List<AnnouncementModel> _recentAnnouncements = [];
   List<Sermon> _featuredSermons = [];
+  List<SocialMediaPost> _latestTikTokPosts = [];
 
   DashboardProvider(this._authProvider);
 
@@ -36,10 +39,12 @@ class DashboardProvider extends ChangeNotifier {
   Map<String, dynamic>? get reportStatistics => _reportStatistics;
   int get totalBranches => _totalBranches;
   int get totalMCs => _totalMCs;
+  int get totalMCMembers => _totalMCMembers;
   int get totalEvents => _totalEvents;
   int get totalAnnouncements => _totalAnnouncements;
   List<AnnouncementModel> get recentAnnouncements => _recentAnnouncements;
   List<Sermon> get featuredSermons => _featuredSermons;
+  List<SocialMediaPost> get latestTikTokPosts => _latestTikTokPosts;
 
   // Computed getters for user stats
   int get totalUsers => _userStatistics?['statistics']?['total_users'] ?? 0;
@@ -59,6 +64,19 @@ class DashboardProvider extends ChangeNotifier {
   int get rejectedReports =>
       _reportStatistics?['statistics']?['by_status']?['rejected'] ?? 0;
 
+  // Week period information getters
+  String get reportsPeriodText =>
+      _reportStatistics?['statistics']?['period']?['display_text'] ??
+      'Current Week';
+  bool get reportsIsSingleWeek =>
+      _reportStatistics?['statistics']?['period']?['is_single_week'] ?? true;
+  String get reportsPeriodType =>
+      _reportStatistics?['statistics']?['period']?['type'] ?? 'current_week';
+  String get reportsPeriodStartDate =>
+      _reportStatistics?['statistics']?['period']?['start_date'] ?? '';
+  String get reportsPeriodEndDate =>
+      _reportStatistics?['statistics']?['period']?['end_date'] ?? '';
+
   /// Load all dashboard data
   Future<void> loadDashboardData() async {
     if (_isLoading) return;
@@ -74,10 +92,12 @@ class DashboardProvider extends ChangeNotifier {
         _loadReportStatistics(),
         _loadBranchCount(),
         _loadMCCount(),
+        _loadMCMembersCount(),
         _loadEventCount(),
         _loadAnnouncementCount(),
         _loadRecentAnnouncements(),
         _loadFeaturedSermons(),
+        _loadLatestTikTokPost(),
       ]);
 
       _logger.i('Dashboard data loaded successfully');
@@ -166,6 +186,24 @@ class DashboardProvider extends ChangeNotifier {
     }
   }
 
+  /// Load MC members count for current user's MC
+  Future<void> _loadMCMembersCount() async {
+    try {
+      final mcId = _authProvider.userMCId;
+      if (mcId != null) {
+        final response = await ApiService.getMC(mcId);
+        final mcData = response['mc'];
+        final members = mcData['members'] as List? ?? [];
+        _totalMCMembers = members.length;
+      } else {
+        _totalMCMembers = 0;
+      }
+    } catch (e) {
+      _logger.e('Failed to load MC members count: $e');
+      _totalMCMembers = 0; // Don't rethrow for non-critical data
+    }
+  }
+
   /// Load event count
   Future<void> _loadEventCount() async {
     try {
@@ -241,13 +279,29 @@ class DashboardProvider extends ChangeNotifier {
   }
 
   /// Load featured/latest sermons for dashboard preview
-  Future<void> _loadFeaturedSermons({int limit = 3}) async {
+  Future<void> _loadFeaturedSermons({int limit = 2}) async {
     try {
       final sermons = await SermonService.getFeaturedSermons(limit: limit);
       _featuredSermons = sermons;
     } catch (e) {
       _logger.e('Failed to load featured sermons: $e');
       _featuredSermons = [];
+    }
+  }
+
+  /// Load latest TikTok posts
+  Future<void> _loadLatestTikTokPost() async {
+    try {
+      final response = await SermonService.getSocialMediaPosts(
+        platform: 'tiktok',
+        perPage: 2,
+      );
+      final posts = response['posts'] as List<SocialMediaPost>? ?? [];
+      _latestTikTokPosts = posts.take(2).toList();
+      _logger.d('Loaded TikTok posts: ${_latestTikTokPosts.length}');
+    } catch (e) {
+      _logger.e('Failed to load latest TikTok posts: $e');
+      _latestTikTokPosts = [];
     }
   }
 
@@ -268,6 +322,7 @@ class DashboardProvider extends ChangeNotifier {
     _totalMCs = 0;
     _totalEvents = 0;
     _totalAnnouncements = 0;
+    _latestTikTokPosts = [];
     notifyListeners();
   }
 }

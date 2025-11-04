@@ -152,6 +152,14 @@ class SermonController extends Controller
     public function update(Request $request, $id)
     {
         try {
+            /** @var User $user */
+            $user = Auth::user();
+
+            // Only admins can update sermons
+            if (!$user->isSuperAdmin() && !$user->isBranchAdmin()) {
+                return response()->json(['error' => 'Unauthorized'], 403);
+            }
+
             $sermon = Sermon::findOrFail($id);
 
             $validator = Validator::make($request->all(), [
@@ -192,6 +200,14 @@ class SermonController extends Controller
     public function destroy($id)
     {
         try {
+            /** @var User $user */
+            $user = Auth::user();
+
+            // Only super admin may delete sermons
+            if (!$user->isSuperAdmin()) {
+                return response()->json(['error' => 'Forbidden'], 403);
+            }
+
             $sermon = Sermon::findOrFail($id);
             $sermon->update(['is_active' => false]);
 

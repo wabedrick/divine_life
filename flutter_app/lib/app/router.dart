@@ -19,6 +19,7 @@ import '../screens/chat/chat_screen.dart';
 import '../screens/sermons/sermons_screen.dart';
 import '../screens/online/online_services_screen.dart';
 import '../screens/giving/giving_screen.dart';
+import '../screens/mc_members/mc_members_screen.dart';
 
 class AppRouter {
   static GoRouter createRouter() {
@@ -112,6 +113,13 @@ class AppRouter {
               builder: (context, state) => const MCsScreen(),
             ),
 
+            // MC Members
+            GoRoute(
+              path: '/mc_members',
+              name: 'mc_members',
+              builder: (context, state) => const MCMembersScreen(),
+            ),
+
             // Reports
             GoRoute(
               path: '/reports',
@@ -161,6 +169,8 @@ class AppRouter {
               builder: (context, state) => const ProfileScreen(),
             ),
 
+            // Downloads route removed: file sharing is disabled in this branch
+
             // Chat Routes
             GoRoute(
               path: '/chat',
@@ -192,6 +202,7 @@ class AppRouter {
       '/users',
       '/branches',
       '/mcs',
+      '/mc_members',
       '/reports',
       '/events',
       '/announcements',

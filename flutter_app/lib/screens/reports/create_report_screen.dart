@@ -25,26 +25,46 @@ class _CreateReportScreenState extends State<CreateReportScreen> {
   // Form controllers
   late final TextEditingController _attendanceController;
   late final TextEditingController _newMembersController;
-  late final TextEditingController _baptismsController;
-  late final TextEditingController _testimoniesController;
+  late final TextEditingController _anagkazoController;
   late final TextEditingController _salvationsController;
-  late final TextEditingController _healingsController;
   late final TextEditingController _offeringController;
   late final TextEditingController _notesController;
-  late final TextEditingController _challengesController;
-  late final TextEditingController _prayerRequestsController;
-  late final TextEditingController _goalsController;
 
   // Form values
-  String _reportType = 'weekly';
   DateTime _reportDate = DateTime.now();
-  int _weekNumber = 1;
+
+  /// Calculate the Sunday of the week containing the given date
+  DateTime _getWeekEndingSunday(DateTime date) {
+    // DateTime.weekday returns 1 for Monday, 2 for Tuesday, ..., 7 for Sunday
+    int weekday = date.weekday;
+
+    // Calculate days to add to reach Sunday
+    // If today is Monday (1), add 6 days to reach Sunday
+    // If today is Tuesday (2), add 5 days to reach Sunday
+    // If today is Sunday (7), add 0 days (already Sunday)
+    int daysToAdd = weekday == 7 ? 0 : 7 - weekday;
+
+    return date.add(Duration(days: daysToAdd));
+  }
+
+  /// Get the week range string for display (Monday - Sunday)
+  String _getWeekRangeString(DateTime weekEndingSunday) {
+    // Calculate Monday of that week (subtract 6 days from Sunday)
+    DateTime monday = weekEndingSunday.subtract(Duration(days: 6));
+
+    // Format the date range
+    String mondayStr = '${monday.day}/${monday.month}/${monday.year}';
+    String sundayStr =
+        '${weekEndingSunday.day}/${weekEndingSunday.month}/${weekEndingSunday.year}';
+
+    return '$mondayStr - $sundayStr';
+  }
 
   @override
   void initState() {
     super.initState();
+    _reportDate = _getWeekEndingSunday(DateTime.now());
     _initializeControllers();
-    _calculateWeekNumber();
     if (widget.isEditing && widget.existingReport != null) {
       _loadExistingReport();
     }
@@ -53,58 +73,42 @@ class _CreateReportScreenState extends State<CreateReportScreen> {
   void _initializeControllers() {
     _attendanceController = TextEditingController();
     _newMembersController = TextEditingController();
-    _baptismsController = TextEditingController();
-    _testimoniesController = TextEditingController();
+    _anagkazoController = TextEditingController();
     _salvationsController = TextEditingController();
-    _healingsController = TextEditingController();
     _offeringController = TextEditingController();
     _notesController = TextEditingController();
-    _challengesController = TextEditingController();
-    _prayerRequestsController = TextEditingController();
-    _goalsController = TextEditingController();
   }
 
   void _loadExistingReport() {
     final report = widget.existingReport!;
     _attendanceController.text = report['members_met']?.toString() ?? '';
     _newMembersController.text = report['new_members']?.toString() ?? '';
+    _anagkazoController.text = report['anagkazo']?.toString() ?? '';
+    _salvationsController.text = report['salvations']?.toString() ?? '';
     _offeringController.text = report['offerings']?.toString() ?? '';
-    _notesController.text = report['evangelism_activities'] ?? '';
-    _challengesController.text = report['comments'] ?? '';
 
-    // Initialize other fields to empty since backend doesn't support them
-    _baptismsController.text = '';
-    _testimoniesController.text = '';
-    _salvationsController.text = '';
-    _healingsController.text = '';
-    _prayerRequestsController.text = '';
-    _goalsController.text = '';
+    // Use correct field based on report type
+    final authProvider = context.read<AuthProvider>();
+    if (authProvider.isMCLeader) {
+      _notesController.text = report['comments'] ?? '';
+    } else {
+      // Branch report uses branch_activities
+      _notesController.text = report['branch_activities'] ?? '';
+    }
 
     if (report['week_ending'] != null) {
       _reportDate = DateTime.parse(report['week_ending']);
     }
   }
 
-  void _calculateWeekNumber() {
-    final now = DateTime.now();
-    final startOfYear = DateTime(now.year, 1, 1);
-    final daysSinceStartOfYear = now.difference(startOfYear).inDays;
-    _weekNumber = (daysSinceStartOfYear / 7).ceil();
-  }
-
   @override
   void dispose() {
     _attendanceController.dispose();
     _newMembersController.dispose();
-    _baptismsController.dispose();
-    _testimoniesController.dispose();
+    _anagkazoController.dispose();
     _salvationsController.dispose();
-    _healingsController.dispose();
     _offeringController.dispose();
     _notesController.dispose();
-    _challengesController.dispose();
-    _prayerRequestsController.dispose();
-    _goalsController.dispose();
     super.dispose();
   }
 
@@ -166,79 +170,13 @@ class _CreateReportScreenState extends State<CreateReportScreen> {
                                     ?.copyWith(fontWeight: FontWeight.bold),
                               ),
                               const SizedBox(height: 16),
-                              OverflowSafeRow(
-                                spacing: 8.0,
-                                children: [
-                                  Expanded(
-                                    child: DropdownButtonFormField<String>(
-                                      initialValue: _reportType,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Type',
-                                        border: OutlineInputBorder(),
-                                        contentPadding: EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 12,
-                                        ),
-                                        isDense: true,
-                                      ),
-                                      isExpanded: true,
-                                      items: const [
-                                        DropdownMenuItem(
-                                          value: 'weekly',
-                                          child: Text(
-                                            'Weekly',
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        DropdownMenuItem(
-                                          value: 'monthly',
-                                          child: Text(
-                                            'Monthly',
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        DropdownMenuItem(
-                                          value: 'special',
-                                          child: Text(
-                                            'Special',
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ],
-                                      onChanged: (value) {
-                                        setState(() {
-                                          _reportType = value!;
-                                        });
-                                      },
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: TextFormField(
-                                      decoration: const InputDecoration(
-                                        labelText: 'Week #',
-                                        border: OutlineInputBorder(),
-                                        contentPadding: EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 12,
-                                        ),
-                                        isDense: true,
-                                      ),
-                                      initialValue: _weekNumber.toString(),
-                                      keyboardType: TextInputType.number,
-                                      onChanged: (value) {
-                                        _weekNumber =
-                                            int.tryParse(value) ?? _weekNumber;
-                                      },
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 16),
                               InkWell(
                                 onTap: () => _selectDate(context),
                                 child: InputDecorator(
                                   decoration: const InputDecoration(
-                                    labelText: 'Date',
+                                    labelText: 'Week Ending (Sunday)',
+                                    helperText:
+                                        'Tap to select any date in the week',
                                     border: OutlineInputBorder(),
                                     suffixIcon: Icon(
                                       Icons.calendar_today,
@@ -250,9 +188,25 @@ class _CreateReportScreenState extends State<CreateReportScreen> {
                                     ),
                                     isDense: true,
                                   ),
-                                  child: Text(
-                                    '${_reportDate.day.toString().padLeft(2, '0')}/${_reportDate.month.toString().padLeft(2, '0')}/${_reportDate.year}',
-                                    overflow: TextOverflow.ellipsis,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        '${_reportDate.day.toString().padLeft(2, '0')}/${_reportDate.month.toString().padLeft(2, '0')}/${_reportDate.year}',
+                                        style: const TextStyle(fontSize: 16),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      Text(
+                                        'Week: ${_getWeekRangeString(_reportDate)}',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey[600],
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
@@ -283,7 +237,7 @@ class _CreateReportScreenState extends State<CreateReportScreen> {
                                     child: TextFormField(
                                       controller: _attendanceController,
                                       decoration: const InputDecoration(
-                                        labelText: 'Attendance',
+                                        labelText: 'Members Met',
                                         border: OutlineInputBorder(),
                                         prefixIcon: Icon(
                                           Icons.people,
@@ -342,12 +296,12 @@ class _CreateReportScreenState extends State<CreateReportScreen> {
                                 children: [
                                   Expanded(
                                     child: TextFormField(
-                                      controller: _baptismsController,
+                                      controller: _anagkazoController,
                                       decoration: const InputDecoration(
-                                        labelText: 'Baptisms',
+                                        labelText: 'Anagkazo',
                                         border: OutlineInputBorder(),
                                         prefixIcon: Icon(
-                                          Icons.water_drop,
+                                          Icons.group_add,
                                           size: 18,
                                         ),
                                         contentPadding: EdgeInsets.symmetric(
@@ -375,52 +329,19 @@ class _CreateReportScreenState extends State<CreateReportScreen> {
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 16),
-                              OverflowSafeRow(
-                                spacing: 8.0,
-                                children: [
-                                  Expanded(
-                                    child: TextFormField(
-                                      controller: _testimoniesController,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Testimonies',
-                                        border: OutlineInputBorder(),
-                                        prefixIcon: Icon(
-                                          Icons.record_voice_over,
-                                          size: 18,
-                                        ),
-                                      ),
-                                      keyboardType: TextInputType.number,
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: TextFormField(
-                                      controller: _healingsController,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Healings',
-                                        border: OutlineInputBorder(),
-                                        prefixIcon: Icon(
-                                          Icons.healing,
-                                          size: 18,
-                                        ),
-                                      ),
-                                      keyboardType: TextInputType.number,
-                                    ),
-                                  ),
-                                ],
-                              ),
+
                               const SizedBox(height: 16),
                               TextFormField(
                                 controller: _offeringController,
                                 decoration: const InputDecoration(
-                                  labelText: 'Offering Amount',
+                                  labelText: 'Offering Amount (UGX)',
                                   border: OutlineInputBorder(),
                                   prefixIcon: Icon(
-                                    Icons.attach_money,
+                                    Icons.monetization_on,
                                     size: 18,
                                   ),
                                   helperText:
-                                      'Optional - financial offering received',
+                                      'Optional - financial offering received in Uganda Shillings',
                                 ),
                                 keyboardType: TextInputType.number,
                               ),
@@ -454,41 +375,6 @@ class _CreateReportScreenState extends State<CreateReportScreen> {
                                       'General observations and highlights',
                                 ),
                                 maxLines: 4,
-                              ),
-                              const SizedBox(height: 16),
-                              TextFormField(
-                                controller: _challengesController,
-                                decoration: const InputDecoration(
-                                  labelText: 'Challenges Faced',
-                                  border: OutlineInputBorder(),
-                                  alignLabelWithHint: true,
-                                  helperText:
-                                      'Difficulties encountered this period',
-                                ),
-                                maxLines: 3,
-                              ),
-                              const SizedBox(height: 16),
-                              TextFormField(
-                                controller: _prayerRequestsController,
-                                decoration: const InputDecoration(
-                                  labelText: 'Prayer Requests',
-                                  border: OutlineInputBorder(),
-                                  alignLabelWithHint: true,
-                                  helperText: 'Specific prayer needs',
-                                ),
-                                maxLines: 3,
-                              ),
-                              const SizedBox(height: 16),
-                              TextFormField(
-                                controller: _goalsController,
-                                decoration: const InputDecoration(
-                                  labelText: 'Goals for Next Period',
-                                  border: OutlineInputBorder(),
-                                  alignLabelWithHint: true,
-                                  helperText:
-                                      'Plans and objectives for upcoming period',
-                                ),
-                                maxLines: 3,
                               ),
                             ],
                           ),
@@ -545,11 +431,16 @@ class _CreateReportScreenState extends State<CreateReportScreen> {
       initialDate: _reportDate,
       firstDate: DateTime(2020),
       lastDate: DateTime.now().add(const Duration(days: 30)),
+      helpText: 'Select any date in the week',
     );
-    if (picked != null && picked != _reportDate) {
-      setState(() {
-        _reportDate = picked;
-      });
+    if (picked != null) {
+      // Calculate the Sunday of the week containing the picked date
+      DateTime weekEndingSunday = _getWeekEndingSunday(picked);
+      if (weekEndingSunday != _reportDate) {
+        setState(() {
+          _reportDate = weekEndingSunday;
+        });
+      }
     }
   }
 
@@ -565,23 +456,44 @@ class _CreateReportScreenState extends State<CreateReportScreen> {
     try {
       final authProvider = context.read<AuthProvider>();
 
-      final reportData = {
-        'mc_id': authProvider.userMCId,
-        'week_ending': _reportDate.toIso8601String().split('T')[0],
-        'members_met': int.tryParse(_attendanceController.text) ?? 0,
-        'new_members': int.tryParse(_newMembersController.text) ?? 0,
-        'offerings': double.tryParse(_offeringController.text) ?? 0.0,
-        'evangelism_activities': _notesController.text.trim().isEmpty
-            ? null
-            : _notesController.text.trim(),
-        'comments': _challengesController.text.trim().isEmpty
-            ? null
-            : _challengesController.text.trim(),
-      };
+      Map<String, dynamic> reportData;
+      String endpoint;
+
+      // Determine report data based on user role
+      if (authProvider.isMCLeader) {
+        // MC Report
+        reportData = {
+          'mc_id': authProvider.userMCId,
+          'week_ending': _reportDate.toIso8601String().split('T')[0],
+          'members_met': int.tryParse(_attendanceController.text) ?? 0,
+          'new_members': int.tryParse(_newMembersController.text) ?? 0,
+          'anagkazo': int.tryParse(_anagkazoController.text) ?? 0,
+          'salvations': int.tryParse(_salvationsController.text) ?? 0,
+          'offerings': double.tryParse(_offeringController.text) ?? 0.0,
+          'comments': _notesController.text.trim().isEmpty
+              ? null
+              : _notesController.text.trim(),
+        };
+        endpoint = '/reports';
+      } else {
+        // Branch Report - for Branch Admins and Super Admins
+        reportData = {
+          'week_ending': _reportDate.toIso8601String().split('T')[0],
+          'total_mcs_reporting': int.tryParse(_attendanceController.text) ?? 0,
+          'total_members_met': int.tryParse(_newMembersController.text) ?? 0,
+          'total_anagkazo': int.tryParse(_anagkazoController.text) ?? 0,
+          'total_salvations': int.tryParse(_salvationsController.text) ?? 0,
+          'total_offerings': double.tryParse(_offeringController.text) ?? 0.0,
+          'branch_activities': _notesController.text.trim().isEmpty
+              ? null
+              : _notesController.text.trim(),
+        };
+        endpoint = '/branch-reports';
+      }
 
       if (widget.isEditing) {
         await ApiService.put(
-          '/reports/${widget.existingReport!['id']}',
+          '$endpoint/${widget.existingReport!['id']}',
           data: reportData,
         );
         if (mounted) {
@@ -590,7 +502,7 @@ class _CreateReportScreenState extends State<CreateReportScreen> {
           );
         }
       } else {
-        await ApiService.post('/reports', data: reportData);
+        await ApiService.post(endpoint, data: reportData);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(

@@ -1,12 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+// foundation import not needed; material.dart provides required symbols
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-// Voice recording is intentionally disabled in this branch to avoid
-// native plugin and build issues. To enable voice messages restore the
-// `record` package imports and implement platform permission handling.
+// Voice recording and file sharing are intentionally disabled in this branch
+// to avoid native plugin and build issues. Attachment UI remains as a TODO.
 import 'package:go_router/go_router.dart';
-// file_picker and dart:io are not needed after audio removal
 import '../../core/models/chat_models.dart';
 import '../../core/providers/chat_provider.dart';
 import '../../core/utils/message_list_diff.dart';
@@ -41,6 +40,9 @@ class _ChatScreenState extends State<ChatScreen>
   Timer? _typingTimer;
   bool _isComposing = false;
   String? _replyToMessageId;
+  String? _editingMessageId;
+  String? _editingOriginalContent;
+  // (comments UI removed — threaded replies handled via reply action)
 
   @override
   void initState() {
@@ -59,6 +61,17 @@ class _ChatScreenState extends State<ChatScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadConversation();
     });
+  }
+
+  // Threaded comments UI removed — replies are handled via long-press Reply.
+
+  /// Download a file from [url] and save it to app documents/downloads, then prompt to open it.
+  Future<void> _downloadFile(String url, String filename) async {
+    // Downloads are disabled in this branch. If you need downloads re-enabled,
+    // we will add a DownloadService and UI later. For now show a message.
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Downloads are disabled in this build')),
+    );
   }
 
   @override
@@ -337,36 +350,99 @@ class _ChatScreenState extends State<ChatScreen>
       return _buildEmptyMessagesState();
     }
 
-    return AnimatedList(
-      key: _animatedListKey,
+    // Build grouped slivers so group headers can be pinned while scrolling.
+    // Group messages by label in the order they appear in the messages list
+    // (preserve chronological ordering used elsewhere in the UI).
+    final List<Map<String, dynamic>> groups = [];
+    String? lastLabel;
+    for (int i = 0; i < messages.length; i++) {
+      final msg = messages[i];
+      final label = _getMessageGroupLabel(msg.createdAt);
+      if (lastLabel == null || lastLabel != label) {
+        groups.add({'label': label, 'messages': <Message>[]});
+        lastLabel = label;
+      }
+      groups.last['messages'].add(msg);
+    }
+
+    return CustomScrollView(
       controller: _scrollController,
-      reverse: false,
-      padding: const EdgeInsets.all(16),
-      initialItemCount: messages.length,
-      itemBuilder: (context, index, animation) {
-        // Defensive: AnimatedList may call with an index that's out-of-sync briefly.
-        if (index < 0 || index >= messages.length) {
-          return const SizedBox.shrink();
-        }
-
-        final message = messages[index];
-        final previousMessage = index < messages.length - 1
-            ? messages[index + 1]
-            : null;
-        final nextMessage = index > 0 ? messages[index - 1] : null;
-
-        return SizeTransition(
-          sizeFactor: animation,
-          axisAlignment: 0.0,
-          child: _buildMessageBubble(
-            message,
-            previousMessage,
-            nextMessage,
-            chatProvider,
+      slivers: [
+        const SliverPadding(padding: EdgeInsets.only(top: 8)),
+        for (final group in groups) ...[
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _GroupHeaderDelegate(
+              label: group['label'] as String,
+              height: 40,
+            ),
           ),
-        );
-      },
+          SliverList(
+            delegate: SliverChildBuilderDelegate((context, idx) {
+              final groupMessages = group['messages'] as List<Message>;
+              if (idx < 0 || idx >= groupMessages.length) return null;
+
+              // Compute global index to provide previous/next semantics
+              // consistent with previous ListView implementation.
+              // Find the global index of this message in the original messages list.
+              final message = groupMessages[idx];
+              final globalIndex = messages.indexWhere(
+                (m) => m.id == message.id,
+              );
+              final previousMessage = globalIndex < messages.length - 1
+                  ? messages[globalIndex + 1]
+                  : null;
+              final nextMessage = globalIndex > 0
+                  ? messages[globalIndex - 1]
+                  : null;
+
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4.0),
+                child: _buildMessageBubble(
+                  message,
+                  previousMessage,
+                  nextMessage,
+                  chatProvider,
+                ),
+              );
+            }, childCount: (group['messages'] as List<Message>).length),
+          ),
+        ],
+        const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
+      ],
     );
+  }
+
+  // Group header is rendered via a pinned SliverPersistentHeader (_GroupHeaderDelegate).
+
+  String _getMessageGroupLabel(DateTime timestamp) {
+    final now = DateTime.now();
+    final localTs = timestamp.toLocal();
+    final today = DateTime(now.year, now.month, now.day);
+    final messageDate = DateTime(localTs.year, localTs.month, localTs.day);
+
+    if (messageDate == today) return 'Today';
+    if (messageDate == today.subtract(const Duration(days: 1))) {
+      return 'Yesterday';
+    }
+
+    final daysDiff = today.difference(messageDate).inDays;
+    if (daysDiff < 7) {
+      // Return weekday name
+      const names = [
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+        'Sunday',
+      ];
+      return names[localTs.weekday - 1];
+    }
+
+    // Older than a week: show full date
+    return '${localTs.day.toString().padLeft(2, '0')}/${localTs.month.toString().padLeft(2, '0')}/${localTs.year}';
   }
 
   Widget _buildEmptyMessagesState() {
@@ -420,7 +496,9 @@ class _ChatScreenState extends State<ChatScreen>
             nextMessage.createdAt.difference(message.createdAt).inMinutes > 5);
 
     return GestureDetector(
-      onLongPress: () => _showMessageOptions(message),
+      // Use double-tap to open message actions (reply/edit/delete) as requested.
+      // This replaces the previous long-press behavior.
+      onDoubleTap: () => _showMessageOptions(message),
       child: Container(
         margin: EdgeInsets.only(
           bottom: shouldShowTimestamp ? 16 : 4,
@@ -490,22 +568,78 @@ class _ChatScreenState extends State<ChatScreen>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      _formatMessageTime(message.createdAt),
+                      _formatMessageTime(message.createdAt) +
+                          (message.updatedAt != null ? ' • edited' : ''),
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: Theme.of(context).colorScheme.outline,
                       ),
                     ),
                     if (isOwnMessage) ...[
                       const SizedBox(width: 4),
-                      Icon(
-                        _getMessageStatusIcon(message.status),
-                        size: 12,
-                        color: _getMessageStatusColor(message.status),
-                      ),
+                      // Show a subtle spinner for optimistic / sending messages
+                      if (message.status == MessageStatus.sending)
+                        SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.8,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Theme.of(context).colorScheme.onPrimary,
+                            ),
+                          ),
+                        )
+                      else ...[
+                        if (message.status == MessageStatus.failed)
+                          // Retry button for failed messages
+                          IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: Icon(
+                              Icons.refresh,
+                              size: 12,
+                              color: Theme.of(context).colorScheme.onPrimary,
+                            ),
+                            tooltip: 'Retry sending',
+                            onPressed: () async {
+                              final chatProvider = context.read<ChatProvider>();
+                              // Capture the messenger before awaiting to avoid using
+                              // BuildContext across an async gap. Also check mounted
+                              // after the await to ensure the widget is still active.
+                              final messenger = ScaffoldMessenger.of(context);
+
+                              // Attempt retry and show result
+                              final success = await chatProvider.retrySend(
+                                message.id,
+                              );
+                              if (!mounted) return;
+
+                              if (success) {
+                                messenger.showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Message resent'),
+                                  ),
+                                );
+                              } else {
+                                messenger.showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Resend failed'),
+                                  ),
+                                );
+                              }
+                            },
+                          )
+                        else
+                          Icon(
+                            _getMessageStatusIcon(message.status),
+                            size: 12,
+                            color: _getMessageStatusColor(message.status),
+                          ),
+                      ],
                     ],
                   ],
                 ),
               ),
+            // Threaded comments UI removed. Use long-press -> Reply to reply.
           ],
         ),
       ),
@@ -541,6 +675,25 @@ class _ChatScreenState extends State<ChatScreen>
           if (message.replyToId != null)
             _buildReplyContent(message, chatProvider),
           _buildMessageTypeContent(message, isOwnMessage),
+          // Show a small edited flag inside the bubble when a message
+          // has been edited, even if the timestamp area is hidden.
+          if (message.isEdited) ...[
+            const SizedBox(height: 6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Text(
+                  'edited',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontStyle: FontStyle.italic,
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.7),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -550,6 +703,27 @@ class _ChatScreenState extends State<ChatScreen>
     final textColor = isOwnMessage
         ? Theme.of(context).colorScheme.onPrimary
         : Theme.of(context).colorScheme.onSurface;
+
+    // If the message has been deleted, show a neutral placeholder
+    if (message.isDeleted) {
+      final placeholderColor = Theme.of(
+        context,
+      ).colorScheme.surfaceContainerHighest;
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.block, color: placeholderColor, size: 16),
+          const SizedBox(width: 8),
+          Text(
+            'Message deleted',
+            style: TextStyle(
+              color: placeholderColor,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      );
+    }
 
     switch (message.type) {
       case MessageType.text:
@@ -651,6 +825,19 @@ class _ChatScreenState extends State<ChatScreen>
                 ],
               ),
             ),
+            if (message.fileUrl != null) ...[
+              const SizedBox(width: 8),
+              IconButton(
+                icon: Icon(Icons.download_rounded, size: 20, color: textColor),
+                tooltip: 'Download',
+                onPressed: () async {
+                  await _downloadFile(
+                    message.fileUrl!,
+                    message.fileName ?? 'file',
+                  );
+                },
+              ),
+            ],
           ],
         );
 
@@ -815,17 +1002,14 @@ class _ChatScreenState extends State<ChatScreen>
       ),
       child: Row(
         children: [
-          IconButton(
-            onPressed: () => _showAttachmentOptions(),
-            icon: const Icon(Icons.add),
-            tooltip: 'Attach file',
-          ),
           Expanded(
             child: TextField(
               controller: _messageController,
               focusNode: _messageFocusNode,
               decoration: InputDecoration(
-                hintText: 'Type a message...',
+                hintText: _editingMessageId == null
+                    ? 'Type a message...'
+                    : 'Edit message...',
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(24),
                   borderSide: BorderSide.none,
@@ -846,6 +1030,20 @@ class _ChatScreenState extends State<ChatScreen>
             ),
           ),
           const SizedBox(width: 8),
+          if (_editingMessageId != null) ...[
+            IconButton(
+              icon: const Icon(Icons.close),
+              tooltip: 'Cancel edit',
+              onPressed: () {
+                setState(() {
+                  _messageController.text = _editingOriginalContent ?? '';
+                  _editingMessageId = null;
+                  _editingOriginalContent = null;
+                });
+              },
+            ),
+            const SizedBox(width: 8),
+          ],
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 200),
             child: _isComposing
@@ -861,13 +1059,15 @@ class _ChatScreenState extends State<ChatScreen>
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.send),
-                    tooltip: 'Send message',
+                    tooltip: _editingMessageId == null
+                        ? 'Send message'
+                        : 'Save edit',
                   )
                 : IconButton(
-                    key: const ValueKey('attachQuick'),
-                    onPressed: () => _showAttachmentOptions(),
-                    icon: const Icon(Icons.attach_file),
-                    tooltip: 'Attach file',
+                    key: const ValueKey('sendDisabled'),
+                    onPressed: null,
+                    icon: const Icon(Icons.send),
+                    tooltip: 'Type a message to enable',
                   ),
           ),
         ],
@@ -884,10 +1084,24 @@ class _ChatScreenState extends State<ChatScreen>
     _messageController.clear();
     _messageFocusNode.requestFocus();
 
-    await chatProvider.sendMessage(
-      content: content,
-      replyToId: _replyToMessageId,
-    );
+    if (_editingMessageId != null) {
+      // Save edit
+      final updated = await chatProvider.editMessage(
+        _editingMessageId!,
+        content,
+      );
+      if (updated != null) {
+        // Clear editing state
+        setState(() {
+          _editingMessageId = null;
+          _editingOriginalContent = null;
+        });
+      }
+    } else {
+      // Fire-and-forget send so the optimistic UI insertion is immediate and
+      // the input does not block while awaiting network latency.
+      chatProvider.sendMessage(content: content, replyToId: _replyToMessageId);
+    }
 
     // Clear reply if any
     if (_replyToMessageId != null) {
@@ -897,6 +1111,8 @@ class _ChatScreenState extends State<ChatScreen>
     }
 
     // Scroll to bottom
+    // Scroll immediately so the newly-inserted optimistic message is visible
+    // without waiting for the round-trip.
     _scrollToBottom();
   }
 
@@ -915,8 +1131,8 @@ class _ChatScreenState extends State<ChatScreen>
   void _showMessageOptions(Message message) {
     final currentUserId = context.read<AuthProvider>().currentUser?['id'];
     final isOwnMessage = message.senderId == currentUserId;
-    final parentContext =
-        context; // Use parent context when showing dialogs/snackbars
+    // parentContext removed - use local contexts for dialogs/snackbars to avoid
+    // referencing contexts across async gaps.
     final authProvider = context.read<AuthProvider>();
     final chatProvider = context.read<ChatProvider>();
 
@@ -959,6 +1175,13 @@ class _ChatScreenState extends State<ChatScreen>
         canDelete = true;
       }
     }
+    // Determine whether current user can edit this message (within 2 minutes)
+    final now = DateTime.now();
+    final ageSeconds = now.difference(message.createdAt).inSeconds;
+    final canEdit =
+        isOwnMessage &&
+        ageSeconds <= 120 &&
+        message.status != MessageStatus.sending;
 
     showModalBottomSheet(
       context: context,
@@ -987,52 +1210,98 @@ class _ChatScreenState extends State<ChatScreen>
               ).showSnackBar(const SnackBar(content: Text('Message copied')));
             },
           ),
+          if (canEdit) ...[
+            ListTile(
+              leading: const Icon(Icons.edit),
+              title: const Text('Edit'),
+              onTap: () {
+                Navigator.pop(context);
+                // Enter edit mode
+                setState(() {
+                  _editingMessageId = message.id;
+                  _editingOriginalContent = message.content;
+                  _messageController.text = message.content;
+                });
+                _messageFocusNode.requestFocus();
+              },
+            ),
+          ],
+
           if (canDelete) ...[
             ListTile(
               leading: const Icon(Icons.delete_outline),
               title: const Text('Delete'),
               onTap: () async {
-                Navigator.pop(context);
+                // Capture ScaffoldMessenger before any await to avoid using the
+                // BuildContext across async gaps. We still wrap the operation
+                // in try/catch to handle unexpected runtime errors.
+                final scaffoldMessenger = ScaffoldMessenger.of(context);
+                try {
+                  Navigator.pop(context);
 
-                if (!mounted) return;
-
-                final scaffoldMessenger = ScaffoldMessenger.of(parentContext);
-                final confirmed = await showDialog<bool>(
-                  context: parentContext,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Delete message'),
-                    content: const Text(
-                      'Are you sure you want to delete this message? This action cannot be undone.',
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(parentContext).pop(false),
-                        child: const Text('Cancel'),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.of(parentContext).pop(true),
-                        child: const Text('Delete'),
-                      ),
-                    ],
-                  ),
-                );
-
-                if (!mounted) return;
-
-                if (confirmed == true) {
-                  final success = await chatProvider.deleteMessage(message.id);
                   if (!mounted) return;
-                  if (success) {
-                    scaffoldMessenger.showSnackBar(
-                      const SnackBar(content: Text('Message deleted')),
-                    );
-                  } else {
-                    scaffoldMessenger.showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          chatProvider.error ?? 'Failed to delete message',
-                        ),
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Delete message'),
+                      content: const Text(
+                        'Are you sure you want to delete this message? This action cannot be undone.',
                       ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(ctx).pop(false),
+                          child: const Text('Cancel'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(ctx).pop(true),
+                          child: const Text('Delete'),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  if (!mounted) return;
+
+                  if (confirmed == true) {
+                    // Schedule the deletion after the current frame to avoid
+                    // calling notifyListeners() while widgets are mid-build
+                    WidgetsBinding.instance.addPostFrameCallback((_) async {
+                      try {
+                        final success = await chatProvider.deleteMessage(
+                          message.id,
+                        );
+                        if (!mounted) return;
+                        if (success) {
+                          scaffoldMessenger.showSnackBar(
+                            const SnackBar(content: Text('Message deleted')),
+                          );
+                        } else {
+                          scaffoldMessenger.showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                chatProvider.error ??
+                                    'Failed to delete message',
+                              ),
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        debugPrint('Error while deleting message: $e');
+                        if (mounted) {
+                          scaffoldMessenger.showSnackBar(
+                            SnackBar(content: Text('Delete failed: $e')),
+                          );
+                        }
+                      }
+                    });
+                  }
+                } catch (e, st) {
+                  debugPrint('Error during delete: $e\n$st');
+                  if (mounted) {
+                    // Use the previously captured scaffoldMessenger to avoid using
+                    // the BuildContext across the async gap.
+                    scaffoldMessenger.showSnackBar(
+                      SnackBar(content: Text('Delete failed: $e')),
                     );
                   }
                 }
@@ -1044,49 +1313,7 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
-  void _showAttachmentOptions() {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Audio option removed: voice messages are disabled in this branch.
-          ListTile(
-            leading: const Icon(Icons.photo),
-            title: const Text('Photo'),
-            onTap: () {
-              Navigator.pop(context);
-              // TODO: Implement photo selection
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.videocam),
-            title: const Text('Video'),
-            onTap: () {
-              Navigator.pop(context);
-              // TODO: Implement video selection
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.attach_file),
-            title: const Text('File'),
-            onTap: () {
-              Navigator.pop(context);
-              // TODO: Implement file selection
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.location_on),
-            title: const Text('Location'),
-            onTap: () {
-              Navigator.pop(context);
-              // TODO: Implement location sharing
-            },
-          ),
-        ],
-      ),
-    );
-  }
+  // Attachment UI removed: file/voice sharing and downloads are disabled in this branch.
 
   // Voice recording removed: related state and helpers were intentionally removed
   // to disable audio/voice messages in this branch.
@@ -1107,22 +1334,34 @@ class _ChatScreenState extends State<ChatScreen>
 
   String _formatMessageTime(DateTime timestamp) {
     final now = DateTime.now();
+    final localTs = timestamp.toLocal();
     final today = DateTime(now.year, now.month, now.day);
-    final messageDate = DateTime(
-      timestamp.year,
-      timestamp.month,
-      timestamp.day,
-    );
+    final messageDate = DateTime(localTs.year, localTs.month, localTs.day);
 
     if (messageDate == today) {
-      // Today: show time
-      return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
+      // Today: show time using local time
+      return '${localTs.hour.toString().padLeft(2, '0')}:${localTs.minute.toString().padLeft(2, '0')}';
     } else if (messageDate == today.subtract(const Duration(days: 1))) {
       // Yesterday
       return 'Yesterday';
     } else {
-      // Older: show date
-      return '${timestamp.day}/${timestamp.month}/${timestamp.year}';
+      final daysDiff = today.difference(messageDate).inDays;
+      if (daysDiff < 7) {
+        // Show weekday name
+        const names = [
+          'Monday',
+          'Tuesday',
+          'Wednesday',
+          'Thursday',
+          'Friday',
+          'Saturday',
+          'Sunday',
+        ];
+        return names[localTs.weekday - 1];
+      }
+
+      // Older than a week: show date
+      return '${localTs.day.toString().padLeft(2, '0')}/${localTs.month.toString().padLeft(2, '0')}/${localTs.year}';
     }
   }
 
@@ -1197,5 +1436,50 @@ class TypingIndicatorPainter extends CustomPainter {
   @override
   bool shouldRepaint(TypingIndicatorPainter oldDelegate) {
     return oldDelegate.animation != animation;
+  }
+}
+
+class _GroupHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final String label;
+  final double height;
+
+  _GroupHeaderDelegate({required this.label, required this.height});
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return Container(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      alignment: Alignment.center,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            fontWeight: FontWeight.w600,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  double get maxExtent => height;
+
+  @override
+  double get minExtent => height;
+
+  @override
+  bool shouldRebuild(covariant _GroupHeaderDelegate oldDelegate) {
+    return oldDelegate.label != label || oldDelegate.height != height;
   }
 }

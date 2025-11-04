@@ -48,6 +48,14 @@ class Branch extends Model
     }
 
     /**
+     * Get all MCs in this branch (alias for missionalCommunities).
+     */
+    public function mcs(): HasMany
+    {
+        return $this->hasMany(MC::class);
+    }
+
+    /**
      * Get all active MCs in this branch.
      */
     public function activeMCs(): HasMany

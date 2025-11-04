@@ -175,7 +175,9 @@ class Message extends Equatable {
   final String? fileName;
   final int? fileSize;
   final String? replyToId;
+  final String? clientId;
   final Map<String, dynamic>? metadata;
+  final bool isDeleted;
   final bool isEncrypted;
 
   const Message({
@@ -193,7 +195,9 @@ class Message extends Equatable {
     this.fileName,
     this.fileSize,
     this.replyToId,
+    this.clientId,
     this.metadata,
+    this.isDeleted = false,
     this.isEncrypted = false,
   });
 
@@ -232,7 +236,12 @@ class Message extends Equatable {
       fileName: json['file_name'],
       fileSize: json['file_size'],
       replyToId: json['reply_to_id']?.toString(),
+      clientId: json['client_id']?.toString(),
       metadata: json['metadata'],
+      isDeleted:
+          (json['is_deleted'] == true) ||
+          (json['deleted'] == true) ||
+          (json['metadata'] is Map && json['metadata']['deleted'] == true),
       isEncrypted: json['is_encrypted'] ?? false,
     );
   }
@@ -253,7 +262,9 @@ class Message extends Equatable {
       'file_name': fileName,
       'file_size': fileSize,
       'reply_to_id': replyToId,
+      'client_id': clientId,
       'metadata': metadata,
+      'is_deleted': isDeleted,
       'is_encrypted': isEncrypted,
     };
   }
@@ -273,8 +284,10 @@ class Message extends Equatable {
     String? fileName,
     int? fileSize,
     String? replyToId,
+    String? clientId,
     Map<String, dynamic>? metadata,
     bool? isEncrypted,
+    bool? isDeleted,
   }) {
     return Message(
       id: id ?? this.id,
@@ -291,8 +304,10 @@ class Message extends Equatable {
       fileName: fileName ?? this.fileName,
       fileSize: fileSize ?? this.fileSize,
       replyToId: replyToId ?? this.replyToId,
+      clientId: clientId ?? this.clientId,
       metadata: metadata ?? this.metadata,
       isEncrypted: isEncrypted ?? this.isEncrypted,
+      isDeleted: isDeleted ?? this.isDeleted,
     );
   }
 
@@ -318,6 +333,16 @@ class Message extends Equatable {
     }
   }
 
+  /// Whether this message has been edited after creation
+  bool get isEdited {
+    if (updatedAt == null) return false;
+    try {
+      return updatedAt!.isAfter(createdAt);
+    } catch (_) {
+      return true;
+    }
+  }
+
   @override
   List<Object?> get props => [
     id,
@@ -334,8 +359,10 @@ class Message extends Equatable {
     fileName,
     fileSize,
     replyToId,
+    clientId,
     metadata,
     isEncrypted,
+    isDeleted,
   ];
 }
 

@@ -38,6 +38,22 @@ class SocialMediaPost {
   });
 
   factory SocialMediaPost.fromJson(Map<String, dynamic> json) {
+    // Handle hashtags - they can come as string or array from the backend
+    List<String> hashtagsList = <String>[];
+    if (json['hashtags'] != null) {
+      if (json['hashtags'] is List) {
+        hashtagsList = List<String>.from(json['hashtags'] as List);
+      } else if (json['hashtags'] is String) {
+        String hashtagsStr = json['hashtags'] as String;
+        // Split by comma, space, or hashtag symbol and clean up
+        hashtagsList = hashtagsStr
+            .split(RegExp(r'[,\s#]+'))
+            .where((tag) => tag.isNotEmpty)
+            .map((tag) => tag.trim())
+            .toList();
+      }
+    }
+
     return SocialMediaPost(
       id: json['id'] as int,
       title: json['title'] as String,
@@ -53,9 +69,7 @@ class SocialMediaPost {
       commentCount: json['comment_count'] as int? ?? 0,
       isFeatured: json['is_featured'] as bool? ?? false,
       isActive: json['is_active'] as bool? ?? true,
-      hashtags: json['hashtags'] != null
-          ? List<String>.from(json['hashtags'] as List)
-          : <String>[],
+      hashtags: hashtagsList,
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
     );

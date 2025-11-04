@@ -18,6 +18,8 @@ class Report extends Model
         'week_ending',
         'members_met',
         'new_members',
+        'salvations',
+        'anagkazo',
         'offerings',
         'evangelism_activities',
         'comments',
@@ -25,6 +27,7 @@ class Report extends Model
         'reviewed_by',
         'reviewed_at',
         'review_comments',
+        'branch_report_id',
     ];
 
     protected $casts = [
@@ -33,6 +36,8 @@ class Report extends Model
         'offerings' => 'decimal:2',
         'members_met' => 'integer',
         'new_members' => 'integer',
+        'salvations' => 'integer',
+        'anagkazo' => 'integer',
     ];
 
     /**
@@ -115,6 +120,14 @@ class Report extends Model
             'reviewed_at' => now(),
             'review_comments' => $comments,
         ]);
+    }
+
+    /**
+     * Get the branch report this MC report is consolidated into.
+     */
+    public function branchReport(): BelongsTo
+    {
+        return $this->belongsTo(BranchReport::class);
     }
 
     /**

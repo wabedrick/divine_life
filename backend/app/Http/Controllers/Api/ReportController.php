@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Report;
 use App\Models\User;
 use App\Models\MC;
+use App\Traits\WeekPeriodCalculator;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -15,6 +16,8 @@ use Carbon\Carbon;
 
 class ReportController extends Controller
 {
+    use WeekPeriodCalculator;
+
     public function __construct()
     {
         $this->middleware('auth:api');
@@ -33,12 +36,12 @@ class ReportController extends Controller
         // Role-based access control
         if ($user->isBranchAdmin()) {
             // Branch admins can see reports from MCs in their branch
-            $query->whereHas('mc', function($q) use ($user) {
+            $query->whereHas('mc', function ($q) use ($user) {
                 $q->where('branch_id', $user->branch_id);
             });
         } elseif ($user->isMCLeader()) {
             // MC leaders can only see their own MC reports
-            $query->whereHas('mc', function($q) use ($user) {
+            $query->whereHas('mc', function ($q) use ($user) {
                 $q->where('leader_id', $user->id);
             });
         } elseif ($user->isMember()) {
@@ -54,12 +57,12 @@ class ReportController extends Controller
         // Apply filters
         if ($request->filled('search')) {
             $search = $request->get('search');
-            $query->where(function($q) use ($search) {
+            $query->where(function ($q) use ($search) {
                 $q->where('comments', 'LIKE', "%{$search}%")
-                  ->orWhere('evangelism_activities', 'LIKE', "%{$search}%")
-                  ->orWhereHas('mc', function($mcQuery) use ($search) {
-                      $mcQuery->where('name', 'LIKE', "%{$search}%");
-                  });
+                    ->orWhere('evangelism_activities', 'LIKE', "%{$search}%")
+                    ->orWhereHas('mc', function ($mcQuery) use ($search) {
+                        $mcQuery->where('name', 'LIKE', "%{$search}%");
+                    });
             });
         }
 
@@ -113,9 +116,10 @@ class ReportController extends Controller
         /** @var User $user */
         $user = Auth::user();
 
-        // Only MC leaders and higher can create reports
+        // Only MC leaders and higher can create MC reports
+        // Note: Branch Admins should use /branch-reports endpoint instead
         if (!$user->isMCLeader() && !$user->isBranchAdmin() && !$user->isSuperAdmin()) {
-            return response()->json(['error' => 'Unauthorized'], 403);
+            return response()->json(['error' => 'Unauthorized to create MC reports'], 403);
         }
 
         $validator = Validator::make($request->all(), [
@@ -123,6 +127,8 @@ class ReportController extends Controller
             'week_ending' => 'required|date',
             'members_met' => 'required|integer|min:0',
             'new_members' => 'required|integer|min:0',
+            'salvations' => 'required|integer|min:0',
+            'anagkazo' => 'nullable|integer|min:0',
             'offerings' => 'required|numeric|min:0',
             'evangelism_activities' => 'nullable|string|max:1000',
             'comments' => 'nullable|string|max:1000',
@@ -240,8 +246,11 @@ class ReportController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
+            'week_ending' => 'sometimes|date|date_format:Y-m-d',
             'members_met' => 'sometimes|integer|min:0',
             'new_members' => 'sometimes|integer|min:0',
+            'salvations' => 'sometimes|integer|min:0',
+            'anagkazo' => 'sometimes|integer|min:0',
             'offerings' => 'sometimes|numeric|min:0',
             'evangelism_activities' => 'nullable|string|max:1000',
             'comments' => 'nullable|string|max:1000',
@@ -274,12 +283,24 @@ class ReportController extends Controller
             return response()->json(['error' => 'Report not found'], 404);
         }
 
-        // Only super admins and branch admins can delete reports
-        if (!$user->isSuperAdmin() && !$user->isBranchAdmin()) {
-            return response()->json(['error' => 'Unauthorized'], 403);
+        // Check if report can be deleted (only pending reports)
+        if (!$report->canBeEdited()) {
+            return response()->json(['error' => 'Cannot delete report that has been reviewed'], 422);
         }
 
-        if ($user->isBranchAdmin() && $user->branch_id !== $report->mc->branch_id) {
+        // Role-based access control
+        $canDelete = false;
+
+        if ($user->isSuperAdmin()) {
+            $canDelete = true;
+        } elseif ($user->isBranchAdmin()) {
+            $canDelete = $user->branch_id === $report->mc->branch_id;
+        } elseif ($user->isMCLeader()) {
+            // MC leaders can delete their own reports
+            $canDelete = $user->id === $report->mc->leader_id;
+        }
+
+        if (!$canDelete) {
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
@@ -388,11 +409,11 @@ class ReportController extends Controller
 
         // Role-based filtering
         if ($user->isBranchAdmin()) {
-            $query->whereHas('mc', function($q) use ($user) {
+            $query->whereHas('mc', function ($q) use ($user) {
                 $q->where('branch_id', $user->branch_id);
             });
         } elseif ($user->isMCLeader()) {
-            $query->whereHas('mc', function($q) use ($user) {
+            $query->whereHas('mc', function ($q) use ($user) {
                 $q->where('leader_id', $user->id);
             });
         } elseif ($user->isMember()) {
@@ -412,6 +433,12 @@ class ReportController extends Controller
             $query->where('week_ending', '<=', $request->get('date_to'));
         }
 
+        // Get week period information
+        $weekInfo = $this->getDateRangeWeekInfo(
+            $request->get('date_from'),
+            $request->get('date_to')
+        );
+
         $statistics = [
             'total_reports' => $query->count(),
             'by_status' => [
@@ -422,7 +449,17 @@ class ReportController extends Controller
             'totals' => [
                 'total_members_met' => (clone $query)->where('status', 'approved')->sum('members_met'),
                 'total_new_members' => (clone $query)->where('status', 'approved')->sum('new_members'),
+                'total_salvations' => (clone $query)->where('status', 'approved')->sum('salvations'),
+                'total_anagkazo' => (clone $query)->where('status', 'approved')->sum('anagkazo'),
+                'total_testimonies' => (clone $query)->where('status', 'approved')->sum('testimonies'),
                 'total_offerings' => (clone $query)->where('status', 'approved')->sum('offerings'),
+            ],
+            'period' => [
+                'type' => $weekInfo['period_type'],
+                'start_date' => $weekInfo['start_date'],
+                'end_date' => $weekInfo['end_date'],
+                'display_text' => $weekInfo['display_text'],
+                'is_single_week' => $weekInfo['is_single_week'],
             ],
         ];
 
@@ -432,12 +469,18 @@ class ReportController extends Controller
             $statistics['averages'] = [
                 'avg_members_met' => round($statistics['totals']['total_members_met'] / $approvedCount, 2),
                 'avg_new_members' => round($statistics['totals']['total_new_members'] / $approvedCount, 2),
+                'avg_salvations' => round($statistics['totals']['total_salvations'] / $approvedCount, 2),
+                'avg_anagkazo' => round($statistics['totals']['total_anagkazo'] / $approvedCount, 2),
+                'avg_testimonies' => round($statistics['totals']['total_testimonies'] / $approvedCount, 2),
                 'avg_offerings' => round($statistics['totals']['total_offerings'] / $approvedCount, 2),
             ];
         } else {
             $statistics['averages'] = [
                 'avg_members_met' => 0,
                 'avg_new_members' => 0,
+                'avg_salvations' => 0,
+                'avg_anagkazo' => 0,
+                'avg_testimonies' => 0,
                 'avg_offerings' => 0,
             ];
         }
@@ -462,7 +505,7 @@ class ReportController extends Controller
 
         // Role-based filtering
         if ($user->isBranchAdmin()) {
-            $query->whereHas('mc', function($q) use ($user) {
+            $query->whereHas('mc', function ($q) use ($user) {
                 $q->where('branch_id', $user->branch_id);
             });
         }

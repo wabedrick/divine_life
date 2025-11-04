@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Branch;
 use App\Models\User;
 use App\Models\MC;
+use App\Models\Report;
+use App\Traits\WeekPeriodCalculator;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -14,6 +16,8 @@ use Illuminate\Support\Facades\DB;
 
 class BranchController extends Controller
 {
+    use WeekPeriodCalculator;
+
     public function __construct()
     {
         $this->middleware('auth:api', ['except' => ['publicIndex']]);
@@ -58,10 +62,10 @@ class BranchController extends Controller
         // Apply filters
         if ($request->filled('search')) {
             $search = $request->get('search');
-            $query->where(function($q) use ($search) {
+            $query->where(function ($q) use ($search) {
                 $q->where('name', 'LIKE', "%{$search}%")
-                  ->orWhere('location', 'LIKE', "%{$search}%")
-                  ->orWhere('description', 'LIKE', "%{$search}%");
+                    ->orWhere('location', 'LIKE', "%{$search}%")
+                    ->orWhere('description', 'LIKE', "%{$search}%");
             });
         }
 
@@ -358,9 +362,9 @@ class BranchController extends Controller
         // Apply filters
         if ($request->filled('search')) {
             $search = $request->get('search');
-            $query->where(function($q) use ($search) {
+            $query->where(function ($q) use ($search) {
                 $q->where('name', 'LIKE', "%{$search}%")
-                  ->orWhere('email', 'LIKE', "%{$search}%");
+                    ->orWhere('email', 'LIKE', "%{$search}%");
             });
         }
 
@@ -474,6 +478,15 @@ class BranchController extends Controller
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
+        // Get current week period information
+        $weekInfo = $this->getDateRangeWeekInfo();
+
+        // Get report statistics for current week
+        $reportQuery = Report::whereHas('mc', function ($q) use ($branch) {
+            $q->where('branch_id', $branch->id);
+        })->where('week_ending', '>=', $weekInfo['start_date'])
+            ->where('week_ending', '<=', $weekInfo['end_date']);
+
         $statistics = [
             'branch_info' => [
                 'id' => $branch->id,
@@ -495,6 +508,28 @@ class BranchController extends Controller
                 'total' => $branch->missionalCommunities()->count(),
                 'active' => $branch->activeMCs()->count(),
                 'inactive' => $branch->missionalCommunities()->where('is_active', false)->count(),
+            ],
+            'reports' => [
+                'current_week' => [
+                    'total' => (clone $reportQuery)->count(),
+                    'pending' => (clone $reportQuery)->where('status', 'pending')->count(),
+                    'approved' => (clone $reportQuery)->where('status', 'approved')->count(),
+                    'rejected' => (clone $reportQuery)->where('status', 'rejected')->count(),
+                ],
+                'totals_current_week' => [
+                    'members_met' => (clone $reportQuery)->where('status', 'approved')->sum('members_met'),
+                    'new_members' => (clone $reportQuery)->where('status', 'approved')->sum('new_members'),
+                    'salvations' => (clone $reportQuery)->where('status', 'approved')->sum('salvations'),
+                    'anagkazo' => (clone $reportQuery)->where('status', 'approved')->sum('anagkazo'),
+                    'offerings' => (clone $reportQuery)->where('status', 'approved')->sum('offerings'),
+                ],
+            ],
+            'period' => [
+                'type' => $weekInfo['period_type'],
+                'start_date' => $weekInfo['start_date'],
+                'end_date' => $weekInfo['end_date'],
+                'display_text' => $weekInfo['display_text'],
+                'is_single_week' => $weekInfo['is_single_week'],
             ],
             'recent_activity' => [
                 'recent_users' => $branch->users()->orderBy('created_at', 'desc')->limit(5)->get(['id', 'name', 'email', 'created_at']),

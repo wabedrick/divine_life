@@ -11,9 +11,9 @@ class ReportModel {
   final String? reviewComments;
 
   // Report data fields
-  final int attendance;
+  final int membersMet; // Changed from attendance to match backend
   final int newMembers;
-  final int baptisms;
+  final int anagkazo;
   final int salvations;
   final int testimonies;
   final double offerings;
@@ -42,9 +42,9 @@ class ReportModel {
     this.reviewedBy,
     this.reviewedAt,
     this.reviewComments,
-    required this.attendance,
+    required this.membersMet,
     required this.newMembers,
-    required this.baptisms,
+    required this.anagkazo,
     required this.salvations,
     required this.testimonies,
     required this.offerings,
@@ -76,9 +76,9 @@ class ReportModel {
           ? DateTime.parse(json['reviewed_at'])
           : null,
       reviewComments: json['review_comments'] as String?,
-      attendance: json['attendance'] as int? ?? 0,
+      membersMet: json['members_met'] as int? ?? 0,
       newMembers: json['new_members'] as int? ?? 0,
-      baptisms: json['baptisms'] as int? ?? 0,
+      anagkazo: json['anagkazo'] as int? ?? 0,
       salvations: json['salvations'] as int? ?? 0,
       testimonies: json['testimonies'] as int? ?? 0,
       offerings: (json['offerings'] as num?)?.toDouble() ?? 0.0,
@@ -110,9 +110,9 @@ class ReportModel {
       'reviewed_by': reviewedBy,
       'reviewed_at': reviewedAt?.toIso8601String(),
       'review_comments': reviewComments,
-      'attendance': attendance,
+      'members_met': membersMet,
       'new_members': newMembers,
-      'baptisms': baptisms,
+      'anagkazo': anagkazo,
       'salvations': salvations,
       'testimonies': testimonies,
       'offerings': offerings,
@@ -142,9 +142,9 @@ class ReportModel {
     int? reviewedBy,
     DateTime? reviewedAt,
     String? reviewComments,
-    int? attendance,
+    int? membersMet,
     int? newMembers,
-    int? baptisms,
+    int? anagkazo,
     int? salvations,
     int? testimonies,
     double? offerings,
@@ -172,9 +172,9 @@ class ReportModel {
       reviewedBy: reviewedBy ?? this.reviewedBy,
       reviewedAt: reviewedAt ?? this.reviewedAt,
       reviewComments: reviewComments ?? this.reviewComments,
-      attendance: attendance ?? this.attendance,
+      membersMet: membersMet ?? this.membersMet,
       newMembers: newMembers ?? this.newMembers,
-      baptisms: baptisms ?? this.baptisms,
+      anagkazo: anagkazo ?? this.anagkazo,
       salvations: salvations ?? this.salvations,
       testimonies: testimonies ?? this.testimonies,
       offerings: offerings ?? this.offerings,

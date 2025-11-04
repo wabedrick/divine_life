@@ -19,11 +19,11 @@ class _ReportsScreenState extends State<ReportsScreen>
   List<Map<String, dynamic>> _pendingReports = [];
   List<Map<String, dynamic>> _filteredMyReports = [];
   List<Map<String, dynamic>> _filteredPendingReports = [];
+  Map<String, dynamic>? _statistics;
   bool _isLoading = true;
   String? _errorMessage;
 
   // Filter state
-  String _selectedType = 'all';
   String _selectedStatus = 'all';
   String _searchQuery = '';
 
@@ -36,6 +36,7 @@ class _ReportsScreenState extends State<ReportsScreen>
       vsync: this,
     );
     _loadReports();
+    _loadStatistics();
   }
 
   @override
@@ -80,6 +81,18 @@ class _ReportsScreenState extends State<ReportsScreen>
     }
   }
 
+  Future<void> _loadStatistics() async {
+    try {
+      final response = await ApiService.getReportStatistics();
+      setState(() {
+        _statistics = response['statistics'];
+      });
+    } catch (e) {
+      // Don't show error for statistics as it's not critical
+      // Statistics will remain null and won't be displayed
+    }
+  }
+
   void _applyFilters() {
     _filteredMyReports = _filterReports(_myReports);
     _filteredPendingReports = _filterReports(_pendingReports);
@@ -89,11 +102,6 @@ class _ReportsScreenState extends State<ReportsScreen>
     List<Map<String, dynamic>> reports,
   ) {
     return reports.where((report) {
-      // Filter by type
-      if (_selectedType != 'all' && report['type'] != _selectedType) {
-        return false;
-      }
-
       // Filter by status
       if (_selectedStatus != 'all' && report['status'] != _selectedStatus) {
         return false;
@@ -102,15 +110,14 @@ class _ReportsScreenState extends State<ReportsScreen>
       // Filter by search query
       if (_searchQuery.isNotEmpty) {
         final query = _searchQuery.toLowerCase();
-        final type = (report['type'] ?? '').toString().toLowerCase();
-        final week = (report['week'] ?? '').toString().toLowerCase();
-        final submitter = (report['user']?['name'] ?? '')
+        final weekRange = _getWeekDateRange(
+          report['week_ending'],
+        ).toLowerCase();
+        final submitter = (report['submitted_by']?['name'] ?? '')
             .toString()
             .toLowerCase();
 
-        if (!type.contains(query) &&
-            !week.contains(query) &&
-            !submitter.contains(query)) {
+        if (!weekRange.contains(query) && !submitter.contains(query)) {
           return false;
         }
       }
@@ -168,28 +175,36 @@ class _ReportsScreenState extends State<ReportsScreen>
       ),
       body: Column(
         children: [
-          // Search Bar
-          Container(
-            padding: const EdgeInsets.all(16),
-            child: TextField(
-              decoration: InputDecoration(
-                hintText: 'Search reports...',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+          // Fixed top section with search and statistics
+          Column(
+            children: [
+              // Search Bar
+              Container(
+                padding: const EdgeInsets.all(16),
+                child: TextField(
+                  decoration: InputDecoration(
+                    hintText: 'Search reports...',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    filled: true,
+                    fillColor: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerHighest,
+                  ),
+                  onChanged: (value) {
+                    setState(() {
+                      _searchQuery = value;
+                      _applyFilters();
+                    });
+                  },
                 ),
-                filled: true,
-                fillColor: Theme.of(
-                  context,
-                ).colorScheme.surfaceContainerHighest,
               ),
-              onChanged: (value) {
-                setState(() {
-                  _searchQuery = value;
-                  _applyFilters();
-                });
-              },
-            ),
+
+              // Statistics Section
+              if (_statistics != null) _buildStatisticsSection(),
+            ],
           ),
 
           // Error Message
@@ -240,40 +255,49 @@ class _ReportsScreenState extends State<ReportsScreen>
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showCreateReportDialog,
-        icon: const Icon(Icons.add_chart),
-        label: const Text('New Report'),
-      ),
+      floatingActionButton: context.read<AuthProvider>().canCreateReports
+          ? FloatingActionButton.extended(
+              onPressed: _showCreateReportDialog,
+              icon: const Icon(Icons.add_chart),
+              label: Text(_getCreateButtonLabel()),
+            )
+          : null,
     );
   }
 
   Widget _buildReportsList(List<Map<String, dynamic>> reports, bool isPending) {
     if (reports.isEmpty) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              isPending ? Icons.pending_actions : Icons.assessment_outlined,
-              size: 64,
-              color: Theme.of(context).textTheme.bodySmall?.color,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              isPending ? 'No pending reports' : 'No reports yet',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              isPending
-                  ? 'Reports awaiting approval will appear here'
-                  : 'Start by creating your first report',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                isPending ? Icons.pending_actions : Icons.assessment_outlined,
+                size: 48, // Reduced from 64
                 color: Theme.of(context).textTheme.bodySmall?.color,
               ),
-            ),
-          ],
+              const SizedBox(height: 12), // Reduced from 16
+              Text(
+                isPending ? 'No pending reports' : 'No reports yet',
+                style: Theme.of(context).textTheme.titleMedium,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 6), // Reduced from 8
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  isPending
+                      ? 'Reports awaiting approval will appear here'
+                      : 'Start by creating your first report',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).textTheme.bodySmall?.color,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -292,10 +316,9 @@ class _ReportsScreenState extends State<ReportsScreen>
   }
 
   Widget _buildReportCard(Map<String, dynamic> report, bool isPending) {
-    final type = report['type'] ?? '';
-    final week = report['week'] ?? '';
     final status = report['status'] ?? '';
-    final submittedBy = report['user']?['first_name'] ?? 'Unknown';
+    final submittedBy = report['submitted_by']?['name'] ?? 'Unknown';
+    final weekEnding = report['week_ending'];
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -306,7 +329,7 @@ class _ReportsScreenState extends State<ReportsScreen>
           child: Icon(_getStatusIcon(status), color: Colors.white),
         ),
         title: Text(
-          '${_getReportTypeDisplayName(type)} - Week $week',
+          'Weekly Report - ${_getWeekDateRange(weekEnding)}',
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         subtitle: Column(
@@ -367,12 +390,21 @@ class _ReportsScreenState extends State<ReportsScreen>
                 ),
               ),
             ] else ...[
-              if (status == 'draft')
+              if (_canEditReport(report))
                 const PopupMenuItem(
                   value: 'edit',
                   child: ListTile(
                     leading: Icon(Icons.edit),
                     title: Text('Edit'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              if (_canDeleteReport(report))
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: ListTile(
+                    leading: Icon(Icons.delete, color: Colors.red),
+                    title: Text('Delete'),
                     contentPadding: EdgeInsets.zero,
                   ),
                 ),
@@ -421,17 +453,91 @@ class _ReportsScreenState extends State<ReportsScreen>
     }
   }
 
-  String _getReportTypeDisplayName(String type) {
-    switch (type) {
-      case 'weekly':
-        return 'Weekly Report';
-      case 'monthly':
-        return 'Monthly Report';
-      case 'special':
-        return 'Special Report';
-      default:
-        return 'Report';
+  String _getWeekDateRange(String? weekEndingStr) {
+    if (weekEndingStr == null || weekEndingStr.isEmpty) {
+      return 'Date range not available';
     }
+
+    try {
+      DateTime weekEnding = DateTime.parse(weekEndingStr);
+
+      // Calculate Monday of that week
+      // weekEnding should be a Sunday, so subtract 6 days to get Monday
+      DateTime monday = weekEnding.subtract(Duration(days: 6));
+
+      // Format the date range
+      String mondayStr = '${monday.day}/${monday.month}/${monday.year}';
+      String sundayStr =
+          '${weekEnding.day}/${weekEnding.month}/${weekEnding.year}';
+
+      return '$mondayStr - $sundayStr';
+    } catch (e) {
+      return 'Invalid date';
+    }
+  }
+
+  bool _canEditReport(Map<String, dynamic> report) {
+    final authProvider = context.read<AuthProvider>();
+    final userId = authProvider.userId;
+    final userBranchId = authProvider.userBranchId;
+
+    if (userId == null) return false;
+
+    // Report must be in pending status to be edited
+    if (report['status'] != 'pending') return false;
+
+    // Super admins can edit any report
+    if (authProvider.isSuperAdmin) return true;
+
+    // Branch admins can edit reports from their branch
+    if (authProvider.isBranchAdmin && userBranchId != null) {
+      final reportMC = report['mc'];
+      if (reportMC != null && reportMC['branch_id'] == userBranchId) {
+        return true;
+      }
+    }
+
+    // MC leaders can edit their own MC reports
+    if (authProvider.isMCLeader) {
+      final reportMC = report['mc'];
+      if (reportMC != null && reportMC['leader_id'] == userId) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  bool _canDeleteReport(Map<String, dynamic> report) {
+    final authProvider = context.read<AuthProvider>();
+    final userId = authProvider.userId;
+    final userBranchId = authProvider.userBranchId;
+
+    if (userId == null) return false;
+
+    // Report must be in pending status to be deleted
+    if (report['status'] != 'pending') return false;
+
+    // Super admins can delete any report
+    if (authProvider.isSuperAdmin) return true;
+
+    // Branch admins can delete reports from their branch
+    if (authProvider.isBranchAdmin && userBranchId != null) {
+      final reportMC = report['mc'];
+      if (reportMC != null && reportMC['branch_id'] == userBranchId) {
+        return true;
+      }
+    }
+
+    // MC leaders can delete their own MC reports
+    if (authProvider.isMCLeader) {
+      final reportMC = report['mc'];
+      if (reportMC != null && reportMC['leader_id'] == userId) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   void _handleReportAction(String action, Map<String, dynamic> report) {
@@ -441,6 +547,9 @@ class _ReportsScreenState extends State<ReportsScreen>
         break;
       case 'edit':
         _showEditReportDialog(report);
+        break;
+      case 'delete':
+        _showDeleteDialog(report);
         break;
       case 'approve':
         _approveReport(report['id']);
@@ -459,7 +568,7 @@ class _ReportsScreenState extends State<ReportsScreen>
       context: context,
       builder: (context) => AlertDialog(
         title: Text(
-          '${_getReportTypeDisplayName(report['type'])} - Week ${report['week']}',
+          'Weekly Report - ${_getWeekDateRange(report['week_ending'])}',
         ),
         content: SingleChildScrollView(
           child: Column(
@@ -467,20 +576,24 @@ class _ReportsScreenState extends State<ReportsScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Status: ${report['status']?.toUpperCase() ?? 'N/A'}'),
-              Text('Attendance: ${report['attendance'] ?? 'N/A'}'),
+              Text('Members Met: ${report['members_met'] ?? 'N/A'}'),
               Text('New Members: ${report['new_members'] ?? 'N/A'}'),
-              Text('Baptisms: ${report['baptisms'] ?? 'N/A'}'),
-              Text('Testimonies: ${report['testimonies'] ?? 'N/A'}'),
+              Text('Anagkazo: ${report['anagkazo'] ?? 'N/A'}'),
+              Text('Salvations: ${report['salvations'] ?? 'N/A'}'),
+              Text('Offerings: UGX ${report['offerings'] ?? 'N/A'}'),
               const SizedBox(height: 12),
-              if (report['notes'] != null) ...[
+              if (_hasValue(report['comments'])) ...[
                 const Text(
-                  'Notes:',
+                  'General Notes:',
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
-                Text(report['notes']),
+                Text(report['comments']?.toString() ?? ''),
+                const SizedBox(height: 8),
               ],
               if (report['submitted_at'] != null)
-                Text('Submitted: ${report['submitted_at']}'),
+                Text(
+                  'Submitted: ${report['submitted_at']?.toString() ?? 'N/A'}',
+                ),
             ],
           ),
         ),
@@ -492,6 +605,17 @@ class _ReportsScreenState extends State<ReportsScreen>
         ],
       ),
     );
+  }
+
+  String _getCreateButtonLabel() {
+    final authProvider = context.read<AuthProvider>();
+    if (authProvider.isMCLeader) {
+      return 'New MC Report';
+    } else if (authProvider.isBranchAdmin) {
+      return 'New Branch Report';
+    } else {
+      return 'New Report';
+    }
   }
 
   void _showCreateReportDialog() async {
@@ -531,6 +655,50 @@ class _ReportsScreenState extends State<ReportsScreen>
         ).showSnackBar(SnackBar(content: Text('Error approving report: $e')));
       }
     }
+  }
+
+  Future<void> _deleteReport(int reportId) async {
+    try {
+      await ApiService.deleteReport(reportId);
+      _loadReports();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Report deleted successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error deleting report: $e')));
+      }
+    }
+  }
+
+  void _showDeleteDialog(Map<String, dynamic> report) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Report'),
+        content: Text(
+          'Are you sure you want to delete the weekly report for ${_getWeekDateRange(report['week_ending'])}?\n\nThis action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _deleteReport(report['id']);
+            },
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showRejectDialog(Map<String, dynamic> report) {
@@ -608,32 +776,13 @@ class _ReportsScreenState extends State<ReportsScreen>
               TextField(
                 decoration: const InputDecoration(
                   labelText: 'Search',
-                  hintText: 'Search by type, week, or submitter...',
+                  hintText: 'Search by date range or submitter...',
                   prefixIcon: Icon(Icons.search),
                   border: OutlineInputBorder(),
                 ),
                 onChanged: (value) {
                   setDialogState(() {
                     _searchQuery = value;
-                  });
-                },
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                initialValue: _selectedType,
-                decoration: const InputDecoration(
-                  labelText: 'Report Type',
-                  border: OutlineInputBorder(),
-                ),
-                items: const [
-                  DropdownMenuItem(value: 'all', child: Text('All Types')),
-                  DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
-                  DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
-                  DropdownMenuItem(value: 'special', child: Text('Special')),
-                ],
-                onChanged: (value) {
-                  setDialogState(() {
-                    _selectedType = value!;
                   });
                 },
               ),
@@ -664,7 +813,6 @@ class _ReportsScreenState extends State<ReportsScreen>
           TextButton(
             onPressed: () {
               setState(() {
-                _selectedType = 'all';
                 _selectedStatus = 'all';
                 _searchQuery = '';
                 _applyFilters();
@@ -884,6 +1032,260 @@ class _ReportsScreenState extends State<ReportsScreen>
       'December',
     ];
     return months[month - 1];
+  }
+
+  bool _hasValue(dynamic value) {
+    if (value == null) return false;
+    if (value is String) return value.trim().isNotEmpty;
+    if (value is num) return true;
+    return value.toString().trim().isNotEmpty;
+  }
+
+  Widget _buildStatisticsSection() {
+    final authProvider = context.read<AuthProvider>();
+    final stats = _statistics!;
+
+    String title = 'Statistics';
+    if (authProvider.isSuperAdmin) {
+      title = 'Global Church Statistics';
+    } else if (authProvider.isBranchAdmin) {
+      title = 'Branch Statistics';
+    } else if (authProvider.isMCLeader) {
+      title = 'MC Statistics';
+    }
+
+    // Add week period information if available
+    String? periodText = stats['period']?['display_text'];
+    String subtitle = periodText ?? 'Current Period';
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.analytics,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _buildStatCard(
+                  'Total Reports',
+                  (stats['total_reports'] ?? 0).toString(),
+                  Icons.assignment,
+                  Colors.blue,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildStatCard(
+                  'Members Met',
+                  (stats['totals']?['total_members_met'] ?? 0).toString(),
+                  Icons.people,
+                  Colors.green,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _buildStatCard(
+                  'New Members',
+                  (stats['totals']?['total_new_members'] ?? 0).toString(),
+                  Icons.person_add,
+                  Colors.orange,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildStatCard(
+                  'Salvations',
+                  (stats['totals']?['total_salvations'] ?? 0).toString(),
+                  Icons.favorite,
+                  Colors.red,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _buildStatCard(
+                  'Anagkazo',
+                  (stats['totals']?['total_anagkazo'] ?? 0).toString(),
+                  Icons.water_drop,
+                  Colors.cyan,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildStatCard(
+                  'Offerings',
+                  'UGX ${(stats['totals']?['total_offerings'] ?? 0.0).toStringAsFixed(0)}',
+                  Icons.attach_money,
+                  Colors.green.shade700,
+                ),
+              ),
+            ],
+          ),
+          if (authProvider.canApproveReports) ...[
+            const SizedBox(height: 8),
+            const Divider(),
+            const SizedBox(height: 4),
+            Text(
+              'Report Status',
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildStatusChip(
+                    'Pending',
+                    (stats['by_status']?['pending'] ?? 0).toString(),
+                    Colors.orange,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildStatusChip(
+                    'Approved',
+                    (stats['by_status']?['approved'] ?? 0).toString(),
+                    Colors.green,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildStatusChip(
+                    'Rejected',
+                    (stats['by_status']?['rejected'] ?? 0).toString(),
+                    Colors.red,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatCard(
+    String title,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: color, size: 16),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: color,
+              fontWeight: FontWeight.bold,
+            ),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusChip(String label, String count, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '$label: $count',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w600,
+              ),
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

@@ -49,10 +49,10 @@ class MCController extends Controller
         // Apply filters
         if ($request->filled('search')) {
             $search = $request->get('search');
-            $query->where(function($q) use ($search) {
+            $query->where(function ($q) use ($search) {
                 $q->where('name', 'LIKE', "%{$search}%")
-                  ->orWhere('vision', 'LIKE', "%{$search}%")
-                  ->orWhere('purpose', 'LIKE', "%{$search}%");
+                    ->orWhere('vision', 'LIKE', "%{$search}%")
+                    ->orWhere('purpose', 'LIKE', "%{$search}%");
             });
         }
 
@@ -352,9 +352,9 @@ class MCController extends Controller
         // Apply filters
         if ($request->filled('search')) {
             $search = $request->get('search');
-            $query->where(function($q) use ($search) {
+            $query->where(function ($q) use ($search) {
                 $q->where('name', 'LIKE', "%{$search}%")
-                  ->orWhere('email', 'LIKE', "%{$search}%");
+                    ->orWhere('email', 'LIKE', "%{$search}%");
             });
         }
 
@@ -410,14 +410,24 @@ class MCController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
-            'user_id' => 'required|exists:users,id'
+            'user_id' => 'required_without:email|exists:users,id',
+            'email' => 'required_without:user_id|email|exists:users,email'
+        ], [
+            'email.exists' => 'No user found with this email address. Please verify the email or ask the user to register first.',
+            'email.email' => 'Please provide a valid email address.',
+            'user_id.exists' => 'User not found in the system.'
         ]);
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $member = User::find($request->user_id);
+        // Find member by user_id or email
+        if ($request->filled('user_id')) {
+            $member = User::find($request->user_id);
+        } else {
+            $member = User::where('email', $request->email)->first();
+        }
 
         // Validate member belongs to same branch
         if ($member->branch_id !== $mc->branch_id) {

@@ -18,13 +18,13 @@ class ApiService {
   static const String _androidEmulator =
       'http://10.0.2.2:8000/api'; // Android emulator
   // ignore: unused_field
-  static const String _localhost = 'http://127.0.0.1:8000/api'; // Localhost
+  static const String _localhost = 'http://localhost:8000/api'; // Localhost
   static const String _ipAddress =
-      'http://192.168.42.41:8000/api'; // Current server IP address
+      'http://192.168.42.32:8000/api'; // Current server IP address
 
   // Configuration for API endpoint
   static String get baseUrl {
-    // Use IP address for physical Android device
+    // Use localhost for desktop development
     return _ipAddress;
   }
 
@@ -106,18 +106,26 @@ class ApiService {
                 _logger.w('401 detected - attempting token refresh');
 
                 try {
-                  final refreshData = await ApiService.refreshToken();
+                  // Capture refresh token locally to avoid races where storage
+                  // could be cleared between checks and the actual request.
+                  final localRefresh = storedRefresh;
+
+                  // Call refresh endpoint directly using captured token
+                  final refreshResp = await _dio.post(
+                    '/auth/refresh',
+                    data: {'refresh_token': localRefresh},
+                  );
+
+                  final refreshData = refreshResp.data as Map<String, dynamic>?;
                   final newToken =
-                      refreshData['access_token'] ?? refreshData['token'];
+                      refreshData?['access_token'] ?? refreshData?['token'];
 
                   if (newToken != null) {
-                    // Save and set header
                     await StorageService.saveAuthToken(newToken);
                     requestOptions.headers['Authorization'] =
                         'Bearer $newToken';
                     requestOptions.extra['retried'] = true;
 
-                    // Retry the original request
                     final opts = Options(
                       method: requestOptions.method,
                       headers: requestOptions.headers,
@@ -133,12 +141,10 @@ class ApiService {
                     return handler.resolve(response);
                   } else {
                     _logger.w('Refresh did not return a new token');
-                    // Clear tokens to force re-authentication
                     await StorageService.clearAuthTokens();
                   }
                 } catch (refreshError) {
                   _logger.w('Token refresh failed: $refreshError');
-                  // Clear tokens after failed refresh so the app can re-login
                   await StorageService.clearAuthTokens();
                 }
               }
@@ -595,6 +601,10 @@ class ApiService {
     return post('/reports/$reportId/reject', data: {'reason': reason});
   }
 
+  static Future<Map<String, dynamic>> deleteReport(int reportId) async {
+    return delete('/reports/$reportId');
+  }
+
   // Events
   static Future<Map<String, dynamic>> getEvents({
     Map<String, dynamic>? filters,
@@ -664,8 +674,55 @@ class ApiService {
     return get('/users/dashboard');
   }
 
-  static Future<Map<String, dynamic>> getReportStatistics() async {
-    return get('/reports/statistics');
+  static Future<Map<String, dynamic>> getReportStatistics({
+    String? dateFrom,
+    String? dateTo,
+  }) async {
+    final Map<String, dynamic> params = <String, dynamic>{};
+    if (dateFrom != null) params['date_from'] = dateFrom;
+    if (dateTo != null) params['date_to'] = dateTo;
+
+    return get('/reports/statistics', queryParameters: params);
+  }
+
+  static Future<Map<String, dynamic>> getBranchStatistics(int branchId) async {
+    return get('/branches/$branchId/statistics');
+  }
+
+  // Automated Branch Reports
+  static Future<Map<String, dynamic>> generateAutomatedBranchReports({
+    String? weekEnding,
+  }) async {
+    return post(
+      '/branch-reports/generate-automated',
+      data: {if (weekEnding != null) 'week_ending': weekEnding},
+    );
+  }
+
+  static Future<Map<String, dynamic>> getPendingAutomatedReports() async {
+    return get('/branch-reports/pending-automated');
+  }
+
+  static Future<Map<String, dynamic>> getPendingBranchReports() async {
+    return get('/branch-reports/pending-for-branch');
+  }
+
+  static Future<Map<String, dynamic>> sendBranchReportToSuperAdmin(
+    int reportId,
+  ) async {
+    return post('/branch-reports/$reportId/send-to-super-admin');
+  }
+
+  static Future<Map<String, dynamic>> markBranchReportAsSent(
+    int reportId,
+  ) async {
+    return post('/branch-reports/$reportId/mark-sent');
+  }
+
+  static Future<Map<String, dynamic>> getBranchReports({
+    Map<String, dynamic>? filters,
+  }) async {
+    return get('/branch-reports', queryParameters: filters);
   }
 
   // Error handling

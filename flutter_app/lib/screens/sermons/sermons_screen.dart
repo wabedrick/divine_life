@@ -131,7 +131,7 @@ class _SermonsTabState extends State<SermonsTab> {
         _logger.d(
           '   - Sermons count: ${(sermonsData['sermons'] as List<Sermon>).length}',
         );
-        _logger.d('   - Featured sermons count: ${featuredSermons.length}');
+        _logger.d('   - Pinned sermons count: ${featuredSermons.length}');
         _logger.d('   - Categories count: ${categories.length}');
 
         setState(() {
@@ -337,14 +337,14 @@ class _SermonsTabState extends State<SermonsTab> {
             child: ListView(
               padding: const EdgeInsets.all(16.0),
               children: [
-                // Featured Sermons Section
+                // Pinned Sermons Section
                 if (_featuredSermons.isNotEmpty) ...[
                   Row(
                     children: [
-                      Icon(Icons.star, color: Colors.amber),
+                      Icon(Icons.push_pin, color: Colors.amber),
                       const SizedBox(width: 8),
                       Text(
-                        'Featured Sermons',
+                        'Pinned Sermons',
                         style: Theme.of(context).textTheme.headlineSmall
                             ?.copyWith(fontWeight: FontWeight.bold),
                       ),
@@ -363,7 +363,7 @@ class _SermonsTabState extends State<SermonsTab> {
                         return Container(
                           width: 300,
                           margin: const EdgeInsets.only(right: 16),
-                          child: _buildFeaturedSermonCard(sermon),
+                          child: _buildPinnedSermonCard(sermon),
                         );
                       },
                     ),
@@ -430,7 +430,7 @@ class _SermonsTabState extends State<SermonsTab> {
     );
   }
 
-  Widget _buildFeaturedSermonCard(Sermon sermon) {
+  Widget _buildPinnedSermonCard(Sermon sermon) {
     return Card(
       elevation: 4,
       clipBehavior: Clip.antiAlias,
@@ -563,6 +563,53 @@ class _SermonsTabState extends State<SermonsTab> {
                         ),
                         if (sermon.isFeatured)
                           const Icon(Icons.star, color: Colors.amber, size: 20),
+                        // Admin actions
+                        Consumer<AuthProvider>(
+                          builder: (context, authProvider, child) {
+                            if (!authProvider.canManageSermons) {
+                              return const SizedBox.shrink();
+                            }
+                            return PopupMenuButton<String>(
+                              icon: const Icon(Icons.more_vert, size: 20),
+                              onSelected: (value) {
+                                if (value == 'edit') {
+                                  _showEditSermonDialog(sermon);
+                                } else if (value == 'delete') {
+                                  _showDeleteSermonDialog(sermon);
+                                }
+                              },
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(
+                                  value: 'edit',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.edit, size: 16),
+                                      SizedBox(width: 8),
+                                      Text('Edit'),
+                                    ],
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'delete',
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.delete,
+                                        size: 16,
+                                        color: Colors.red,
+                                      ),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        'Delete',
+                                        style: TextStyle(color: Colors.red),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
                       ],
                     ),
 
@@ -676,6 +723,60 @@ class _SermonsTabState extends State<SermonsTab> {
       ),
     );
   }
+
+  void _showEditSermonDialog(Sermon sermon) {
+    showDialog(
+      context: context,
+      builder: (context) => EditSermonDialog(
+        sermon: sermon,
+        onSermonUpdated: () {
+          _loadInitialData();
+        },
+      ),
+    );
+  }
+
+  void _showDeleteSermonDialog(Sermon sermon) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete Sermon'),
+        content: Text('Are you sure you want to delete "${sermon.title}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext); // Close dialog
+              _deleteSermon(sermon); // Then delete sermon
+            },
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteSermon(Sermon sermon) async {
+    try {
+      await SermonService.deleteSermon(sermon.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sermon deleted successfully')),
+        );
+        _loadInitialData();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error deleting sermon: $e')));
+      }
+    }
+  }
 }
 
 class SocialMediaTab extends StatefulWidget {
@@ -707,6 +808,8 @@ class _SocialMediaTabState extends State<SocialMediaTab> {
     try {
       setState(() => _isLoading = true);
 
+      print('🔄 Loading social media data...');
+
       // Make API calls separately to handle different return types
       final postsDataFuture = SermonService.getSocialMediaPosts(
         page: 1,
@@ -718,8 +821,13 @@ class _SocialMediaTabState extends State<SocialMediaTab> {
       final platformsFuture = SermonService.getSocialMediaPlatforms();
 
       final postsData = await postsDataFuture;
+      print('✅ Posts data loaded: ${postsData['posts'].length} posts');
+
       final featuredPosts = await featuredPostsFuture;
+      print('✅ Pinned posts loaded: ${featuredPosts.length} posts');
+
       final platforms = await platformsFuture;
+      print('✅ Platforms loaded: ${platforms.length} platforms');
 
       if (mounted) {
         setState(() {
@@ -731,8 +839,11 @@ class _SocialMediaTabState extends State<SocialMediaTab> {
           _hasMorePages = pagination['current_page'] < pagination['last_page'];
           _isLoading = false;
         });
+        print('✅ State updated successfully');
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      print('❌ Error loading social media data: $e');
+      print('Stack trace: $stackTrace');
       if (mounted) {
         setState(() => _isLoading = false);
         _showErrorSnackBar('Failed to load social media posts: $e');
@@ -920,14 +1031,14 @@ class _SocialMediaTabState extends State<SocialMediaTab> {
             child: ListView(
               padding: const EdgeInsets.all(16.0),
               children: [
-                // Featured Posts Section
+                // Pinned Posts Section
                 if (_featuredPosts.isNotEmpty) ...[
                   Row(
                     children: [
-                      Icon(Icons.star, color: Colors.amber),
+                      Icon(Icons.push_pin, color: Colors.amber),
                       const SizedBox(width: 8),
                       Text(
-                        'Featured Posts',
+                        'Pinned Posts',
                         style: Theme.of(context).textTheme.headlineSmall
                             ?.copyWith(fontWeight: FontWeight.bold),
                       ),
@@ -1202,6 +1313,69 @@ class _SocialMediaTabState extends State<SocialMediaTab> {
                         child: Icon(Icons.star, color: Colors.amber, size: 20),
                       ),
 
+                    // Admin actions
+                    Consumer<AuthProvider>(
+                      builder: (context, authProvider, child) {
+                        if (!authProvider.canManageSermons) {
+                          return const SizedBox.shrink();
+                        }
+                        return Positioned(
+                          top: 8,
+                          left: post.isFeatured ? 36 : 8,
+                          child: PopupMenuButton<String>(
+                            icon: Container(
+                              padding: const EdgeInsets.all(2),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.5),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.more_vert,
+                                size: 16,
+                                color: Colors.white,
+                              ),
+                            ),
+                            onSelected: (value) {
+                              if (value == 'edit') {
+                                _showEditSocialMediaDialog(post);
+                              } else if (value == 'delete') {
+                                _showDeleteSocialMediaDialog(post);
+                              }
+                            },
+                            itemBuilder: (context) => [
+                              const PopupMenuItem(
+                                value: 'edit',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.edit, size: 16),
+                                    SizedBox(width: 8),
+                                    Text('Edit'),
+                                  ],
+                                ),
+                              ),
+                              const PopupMenuItem(
+                                value: 'delete',
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.delete,
+                                      size: 16,
+                                      color: Colors.red,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Delete',
+                                      style: TextStyle(color: Colors.red),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+
                     // Play/view overlay
                     Center(
                       child: Container(
@@ -1296,6 +1470,60 @@ class _SocialMediaTabState extends State<SocialMediaTab> {
     };
     return platformColors[platform] ?? Colors.grey;
   }
+
+  void _showEditSocialMediaDialog(SocialMediaPost post) {
+    showDialog(
+      context: context,
+      builder: (context) => EditSocialMediaDialog(
+        post: post,
+        onPostUpdated: () {
+          _loadInitialData();
+        },
+      ),
+    );
+  }
+
+  void _showDeleteSocialMediaDialog(SocialMediaPost post) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete Post'),
+        content: Text('Are you sure you want to delete "${post.title}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext); // Close dialog
+              _deleteSocialMediaPost(post); // Then delete post
+            },
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteSocialMediaPost(SocialMediaPost post) async {
+    try {
+      await SermonService.deleteSocialMediaPost(post.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Post deleted successfully')),
+        );
+        _loadInitialData();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error deleting post: $e')));
+      }
+    }
+  }
 }
 
 class AddContentDialog extends StatefulWidget {
@@ -1320,13 +1548,15 @@ class _AddContentDialogState extends State<AddContentDialog>
   final _durationController = TextEditingController();
   String _selectedCategory = 'sunday_service';
   bool _isFeatured = false;
+  DateTime _selectedDate = DateTime.now();
+  TimeOfDay _selectedTime = TimeOfDay.now();
 
   // Social Media fields
   final _smTitleController = TextEditingController();
   final _smDescriptionController = TextEditingController();
   final _postUrlController = TextEditingController();
   final _hashtagsController = TextEditingController();
-  String _selectedPlatform = 'youtube_shorts';
+  String _selectedPlatform = 'tiktok';
   String _mediaType = 'video';
   bool _smIsFeatured = false;
 
@@ -1351,6 +1581,32 @@ class _AddContentDialogState extends State<AddContentDialog>
     _postUrlController.dispose();
     _hashtagsController.dispose();
     super.dispose();
+  }
+
+  Future<void> _selectDate() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+    );
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        _selectedDate = picked;
+      });
+    }
+  }
+
+  Future<void> _selectTime() async {
+    final TimeOfDay? picked = await showTimePicker(
+      context: context,
+      initialTime: _selectedTime,
+    );
+    if (picked != null && picked != _selectedTime) {
+      setState(() {
+        _selectedTime = picked;
+      });
+    }
   }
 
   @override
@@ -1499,6 +1755,54 @@ class _AddContentDialogState extends State<AddContentDialog>
 
           const SizedBox(height: 16),
 
+          // Date Picker
+          InkWell(
+            onTap: _selectDate,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Sermon Date: ${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}',
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                  const Icon(Icons.calendar_today),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Time Picker
+          InkWell(
+            onTap: _selectTime,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Sermon Time: ${_selectedTime.format(context)}',
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                  const Icon(Icons.access_time),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
           DropdownButtonFormField<String>(
             initialValue: _selectedCategory,
             decoration: const InputDecoration(
@@ -1511,12 +1815,8 @@ class _AddContentDialogState extends State<AddContentDialog>
                 child: Text('Sunday Service'),
               ),
               DropdownMenuItem(
-                value: 'bible_study',
-                child: Text('Bible Study'),
-              ),
-              DropdownMenuItem(
                 value: 'prayer_meeting',
-                child: Text('Prayer Meeting'),
+                child: Text('Friday Prayer Service'),
               ),
               DropdownMenuItem(
                 value: 'youth_service',
@@ -1533,7 +1833,7 @@ class _AddContentDialogState extends State<AddContentDialog>
           const SizedBox(height: 16),
 
           CheckboxListTile(
-            title: const Text('Featured Sermon'),
+            title: const Text('Pinned Sermon'),
             value: _isFeatured,
             onChanged: (value) => setState(() => _isFeatured = value ?? false),
           ),
@@ -1640,7 +1940,7 @@ class _AddContentDialogState extends State<AddContentDialog>
           const SizedBox(height: 16),
 
           CheckboxListTile(
-            title: const Text('Featured Post'),
+            title: const Text('Pinned Post'),
             value: _smIsFeatured,
             onChanged: (value) =>
                 setState(() => _smIsFeatured = value ?? false),
@@ -1658,6 +1958,14 @@ class _AddContentDialogState extends State<AddContentDialog>
     try {
       if (_tabController.index == 0) {
         // Submit sermon
+        final sermonDateTime = DateTime(
+          _selectedDate.year,
+          _selectedDate.month,
+          _selectedDate.day,
+          _selectedTime.hour,
+          _selectedTime.minute,
+        );
+
         final sermonData = {
           'title': _titleController.text,
           'description': _descriptionController.text,
@@ -1666,6 +1974,7 @@ class _AddContentDialogState extends State<AddContentDialog>
           'duration': int.tryParse(_durationController.text) ?? 0,
           'category': _selectedCategory,
           'is_featured': _isFeatured,
+          'sermon_date': sermonDateTime.toIso8601String(),
         };
 
         await SermonService.createSermon(sermonData);
@@ -1677,11 +1986,17 @@ class _AddContentDialogState extends State<AddContentDialog>
         }
       } else {
         // Submit social media post
+        final hashtagsList = _hashtagsController.text
+            .split(RegExp(r'[,\s#]+'))
+            .where((tag) => tag.isNotEmpty)
+            .map((tag) => tag.trim())
+            .toList();
+
         final postData = {
           'title': _smTitleController.text,
           'description': _smDescriptionController.text,
           'post_url': _postUrlController.text,
-          'hashtags': _hashtagsController.text,
+          'hashtags': hashtagsList.join(', '), // Convert back to string
           'platform': _selectedPlatform,
           'media_type': _mediaType,
           'is_featured': _smIsFeatured,
@@ -1700,6 +2015,642 @@ class _AddContentDialogState extends State<AddContentDialog>
 
       if (mounted) {
         widget.onContentAdded?.call();
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+}
+
+// Edit Sermon Dialog
+class EditSermonDialog extends StatefulWidget {
+  final Sermon sermon;
+  final VoidCallback? onSermonUpdated;
+
+  const EditSermonDialog({
+    super.key,
+    required this.sermon,
+    this.onSermonUpdated,
+  });
+
+  @override
+  State<EditSermonDialog> createState() => _EditSermonDialogState();
+}
+
+class _EditSermonDialogState extends State<EditSermonDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late TextEditingController _titleController;
+  late TextEditingController _descriptionController;
+  late TextEditingController _youtubeUrlController;
+  late TextEditingController _speakerController;
+  late TextEditingController _durationController;
+  late String _selectedCategory;
+  late bool _isFeatured;
+  late DateTime _selectedDate;
+  late TimeOfDay _selectedTime;
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController(text: widget.sermon.title);
+    _descriptionController = TextEditingController(
+      text: widget.sermon.description,
+    );
+    _youtubeUrlController = TextEditingController(
+      text: widget.sermon.youtubeUrl,
+    );
+    _speakerController = TextEditingController(text: widget.sermon.speaker);
+    _durationController = TextEditingController(
+      text: widget.sermon.durationSeconds?.toString() ?? '',
+    );
+    _selectedCategory = widget.sermon.category;
+    _isFeatured = widget.sermon.isFeatured;
+    _selectedDate = widget.sermon.sermonDate;
+    _selectedTime = TimeOfDay(
+      hour: widget.sermon.sermonDate.hour,
+      minute: widget.sermon.sermonDate.minute,
+    );
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    _youtubeUrlController.dispose();
+    _speakerController.dispose();
+    _durationController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _selectDate() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+    );
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        _selectedDate = picked;
+      });
+    }
+  }
+
+  Future<void> _selectTime() async {
+    final TimeOfDay? picked = await showTimePicker(
+      context: context,
+      initialTime: _selectedTime,
+    );
+    if (picked != null && picked != _selectedTime) {
+      setState(() {
+        _selectedTime = picked;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      child: Container(
+        width: MediaQuery.of(context).size.width * 0.9,
+        height: MediaQuery.of(context).size.height * 0.8,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            // Header
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Edit Sermon',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+
+            // Form
+            Expanded(
+              child: Form(
+                key: _formKey,
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      TextFormField(
+                        controller: _titleController,
+                        decoration: const InputDecoration(
+                          labelText: 'Sermon Title *',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter a title';
+                          }
+                          return null;
+                        },
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      TextFormField(
+                        controller: _descriptionController,
+                        decoration: const InputDecoration(
+                          labelText: 'Description',
+                          border: OutlineInputBorder(),
+                        ),
+                        maxLines: 3,
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      TextFormField(
+                        controller: _youtubeUrlController,
+                        decoration: const InputDecoration(
+                          labelText: 'YouTube URL *',
+                          hintText: 'https://www.youtube.com/watch?v=...',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter YouTube URL';
+                          }
+                          if (!value.contains('youtube.com') &&
+                              !value.contains('youtu.be')) {
+                            return 'Please enter a valid YouTube URL';
+                          }
+                          return null;
+                        },
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      TextFormField(
+                        controller: _speakerController,
+                        decoration: const InputDecoration(
+                          labelText: 'Speaker *',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter speaker name';
+                          }
+                          return null;
+                        },
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      TextFormField(
+                        controller: _durationController,
+                        decoration: const InputDecoration(
+                          labelText: 'Duration (minutes)',
+                          hintText: '45',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.number,
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Date Picker
+                      InkWell(
+                        onTap: _selectDate,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 16,
+                          ),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Sermon Date: ${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}',
+                                style: const TextStyle(fontSize: 16),
+                              ),
+                              const Icon(Icons.calendar_today),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Time Picker
+                      InkWell(
+                        onTap: _selectTime,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 16,
+                          ),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Sermon Time: ${_selectedTime.format(context)}',
+                                style: const TextStyle(fontSize: 16),
+                              ),
+                              const Icon(Icons.access_time),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      DropdownButtonFormField<String>(
+                        initialValue: _selectedCategory,
+                        decoration: const InputDecoration(
+                          labelText: 'Category',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'sunday_service',
+                            child: Text('Sunday Service'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'prayer_meeting',
+                            child: Text('Friday Prayer Service'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'youth_service',
+                            child: Text('Youth Service'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'special_event',
+                            child: Text('Special Event'),
+                          ),
+                        ],
+                        onChanged: (value) =>
+                            setState(() => _selectedCategory = value!),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      CheckboxListTile(
+                        title: const Text('Pinned Sermon'),
+                        value: _isFeatured,
+                        onChanged: (value) =>
+                            setState(() => _isFeatured = value ?? false),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Submit button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _isSubmitting ? null : _updateSermon,
+                child: _isSubmitting
+                    ? const CircularProgressIndicator()
+                    : const Text('Update Sermon'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _updateSermon() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      final sermonDateTime = DateTime(
+        _selectedDate.year,
+        _selectedDate.month,
+        _selectedDate.day,
+        _selectedTime.hour,
+        _selectedTime.minute,
+      );
+
+      final sermonData = {
+        'title': _titleController.text,
+        'description': _descriptionController.text,
+        'youtube_url': _youtubeUrlController.text,
+        'speaker': _speakerController.text,
+        'duration': int.tryParse(_durationController.text) ?? 0,
+        'category': _selectedCategory,
+        'is_featured': _isFeatured,
+        'sermon_date': sermonDateTime.toIso8601String(),
+      };
+
+      await SermonService.updateSermon(widget.sermon.id, sermonData);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sermon updated successfully!')),
+        );
+        widget.onSermonUpdated?.call();
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+}
+
+// Edit Social Media Dialog
+class EditSocialMediaDialog extends StatefulWidget {
+  final SocialMediaPost post;
+  final VoidCallback? onPostUpdated;
+
+  const EditSocialMediaDialog({
+    super.key,
+    required this.post,
+    this.onPostUpdated,
+  });
+
+  @override
+  State<EditSocialMediaDialog> createState() => _EditSocialMediaDialogState();
+}
+
+class _EditSocialMediaDialogState extends State<EditSocialMediaDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late TextEditingController _titleController;
+  late TextEditingController _descriptionController;
+  late TextEditingController _postUrlController;
+  late TextEditingController _hashtagsController;
+  late String _selectedPlatform;
+  late String _mediaType;
+  late bool _isFeatured;
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController(text: widget.post.title);
+    _descriptionController = TextEditingController(
+      text: widget.post.description,
+    );
+    _postUrlController = TextEditingController(text: widget.post.postUrl);
+    _hashtagsController = TextEditingController(
+      text: widget.post.hashtags.join(', '),
+    );
+    _selectedPlatform = widget.post.platform;
+    _mediaType = widget.post.mediaType;
+    _isFeatured = widget.post.isFeatured;
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    _postUrlController.dispose();
+    _hashtagsController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      child: Container(
+        width: MediaQuery.of(context).size.width * 0.9,
+        height: MediaQuery.of(context).size.height * 0.8,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            // Header
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Edit Social Media Post',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+
+            // Form
+            Expanded(
+              child: Form(
+                key: _formKey,
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      TextFormField(
+                        controller: _titleController,
+                        decoration: const InputDecoration(
+                          labelText: 'Post Title *',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter a title';
+                          }
+                          return null;
+                        },
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      TextFormField(
+                        controller: _descriptionController,
+                        decoration: const InputDecoration(
+                          labelText: 'Description',
+                          border: OutlineInputBorder(),
+                        ),
+                        maxLines: 3,
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      TextFormField(
+                        controller: _postUrlController,
+                        decoration: const InputDecoration(
+                          labelText: 'Post URL *',
+                          hintText: 'https://www.instagram.com/p/...',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter post URL';
+                          }
+                          return null;
+                        },
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      TextFormField(
+                        controller: _hashtagsController,
+                        decoration: const InputDecoration(
+                          labelText: 'Hashtags',
+                          hintText: '#church #faith #worship',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      DropdownButtonFormField<String>(
+                        initialValue: _selectedPlatform,
+                        decoration: const InputDecoration(
+                          labelText: 'Platform',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'instagram',
+                            child: Text('Instagram'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'facebook',
+                            child: Text('Facebook'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'youtube_shorts',
+                            child: Text('YouTube Shorts'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'tiktok',
+                            child: Text('TikTok'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'twitter',
+                            child: Text('Twitter'),
+                          ),
+                        ],
+                        onChanged: (value) =>
+                            setState(() => _selectedPlatform = value!),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      DropdownButtonFormField<String>(
+                        initialValue: _mediaType,
+                        decoration: const InputDecoration(
+                          labelText: 'Media Type',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'video',
+                            child: Text('Video'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'image',
+                            child: Text('Image'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'carousel',
+                            child: Text('Carousel'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'story',
+                            child: Text('Story'),
+                          ),
+                        ],
+                        onChanged: (value) =>
+                            setState(() => _mediaType = value!),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      CheckboxListTile(
+                        title: const Text('Pinned Post'),
+                        value: _isFeatured,
+                        onChanged: (value) =>
+                            setState(() => _isFeatured = value ?? false),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Submit button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _isSubmitting ? null : _updatePost,
+                child: _isSubmitting
+                    ? const CircularProgressIndicator()
+                    : const Text('Update Post'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _updatePost() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      final hashtagsList = _hashtagsController.text
+          .split(RegExp(r'[,\s#]+'))
+          .where((tag) => tag.isNotEmpty)
+          .map((tag) => tag.trim())
+          .toList();
+
+      final postData = {
+        'title': _titleController.text,
+        'description': _descriptionController.text,
+        'post_url': _postUrlController.text,
+        'hashtags': hashtagsList, // Keep as array for UPDATE
+        'platform': _selectedPlatform,
+        'media_type': _mediaType,
+        'is_featured': _isFeatured,
+      };
+
+      await SermonService.updateSocialMediaPost(widget.post.id, postData);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Post updated successfully!')),
+        );
+        widget.onPostUpdated?.call();
         Navigator.pop(context);
       }
     } catch (e) {

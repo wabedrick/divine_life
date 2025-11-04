@@ -37,13 +37,14 @@ class DivineLifeChurchApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
-        ChangeNotifierProvider(create: (_) => AppStateProvider()),
+  ChangeNotifierProvider(create: (_) => AppStateProvider()),
         ChangeNotifierProxyProvider<AuthProvider, DashboardProvider>(
           create: (context) => DashboardProvider(context.read<AuthProvider>()),
           update: (context, authProvider, dashboardProvider) =>
               dashboardProvider ?? DashboardProvider(authProvider),
         ),
-        ChangeNotifierProvider(create: (_) => ChatProvider()),
+  ChangeNotifierProvider(create: (_) => ChatProvider()),
+  // Downloads manager removed: file sharing disabled in this branch
       ],
       child: const MyApp(),
     );

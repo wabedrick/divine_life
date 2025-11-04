@@ -31,12 +31,12 @@ class ChatController extends Controller
             if ($type === 'branch') {
                 // Members can only see their own branch conversations
                 $query->where('type', 'branch')
-                      ->where('branch_id', $user->branch_id);
+                    ->where('branch_id', $user->branch_id);
             } elseif ($type === 'mc') {
                 // Members can only see MC conversations if they're assigned to an MC
                 if ($user->mc_id) {
                     $query->where('type', 'mc')
-                          ->where('mc_id', $user->mc_id);
+                        ->where('mc_id', $user->mc_id);
                 } else {
                     // No MC assigned, return empty result
                     $query->whereRaw('1 = 0');
@@ -44,39 +44,45 @@ class ChatController extends Controller
             } elseif ($type === 'group') {
                 // Members can see group chats they're participants in
                 $query->where('type', 'group')
-                      ->whereHas('participants', function ($subQ) use ($user) {
-                          $subQ->where('user_id', $user->id)->whereNull('left_at');
-                      });
+                    ->whereHas('participants', function ($subQ) use ($user) {
+                        $subQ->where('user_id', $user->id)->whereNull('left_at');
+                    });
             } elseif ($type === 'individual') {
                 // Members can see individual chats they're participants in
                 $query->where('type', 'individual')
-                      ->whereHas('participants', function ($subQ) use ($user) {
-                          $subQ->where('user_id', $user->id)->whereNull('left_at');
-                      });
+                    ->whereHas('participants', function ($subQ) use ($user) {
+                        $subQ->where('user_id', $user->id)->whereNull('left_at');
+                    });
+            } elseif ($type === 'announcement') {
+                // Members can always see announcement/global conversations
+                $query->where('type', 'announcement');
             } else {
                 // 'all' or no type - show all accessible conversations
-                $query->where(function($q) use ($user) {
+                $query->where(function ($q) use ($user) {
                     // Own branch conversations
-                    $q->orWhere(function($branchQ) use ($user) {
+                    $q->orWhere(function ($branchQ) use ($user) {
                         $branchQ->where('type', 'branch')
-                               ->where('branch_id', $user->branch_id);
+                            ->where('branch_id', $user->branch_id);
                     });
 
                     // Own MC conversations (if assigned to MC)
                     if ($user->mc_id) {
-                        $q->orWhere(function($mcQ) use ($user) {
+                        $q->orWhere(function ($mcQ) use ($user) {
                             $mcQ->where('type', 'mc')
-                               ->where('mc_id', $user->mc_id);
+                                ->where('mc_id', $user->mc_id);
                         });
                     }
 
                     // Group/individual chats they're participants in
-                    $q->orWhere(function($groupQ) use ($user) {
+                    $q->orWhere(function ($groupQ) use ($user) {
                         $groupQ->whereIn('type', ['group', 'individual'])
-                               ->whereHas('participants', function ($subQ) use ($user) {
-                                   $subQ->where('user_id', $user->id)->whereNull('left_at');
-                               });
+                            ->whereHas('participants', function ($subQ) use ($user) {
+                                $subQ->where('user_id', $user->id)->whereNull('left_at');
+                            });
                     });
+
+                    // Include announcement/global conversations for all users
+                    $q->orWhere('type', 'announcement');
                 });
             }
         } else {
@@ -84,7 +90,7 @@ class ChatController extends Controller
             if ($type === 'branch' || $type === 'all') {
                 // Admin users can see their branch + HQ
                 $branchQuery = Conversation::where('type', 'branch')
-                    ->where(function($q) use ($user) {
+                    ->where(function ($q) use ($user) {
                         $q->where('branch_id', $user->branch_id); // User's branch
 
                         // Add HQ branch for admins (Divine Life - HQ)
@@ -99,7 +105,7 @@ class ChatController extends Controller
                 if ($type === 'branch') {
                     $query = $branchQuery;
                 } else {
-                    $query->where(function($q) use ($branchQuery) {
+                    $query->where(function ($q) use ($branchQuery) {
                         $q->whereIn('id', $branchQuery->pluck('id'));
                     });
                 }
@@ -111,7 +117,7 @@ class ChatController extends Controller
 
                 if ($user->isBranchAdmin() || $user->isSuperAdmin()) {
                     // Branch admins can see all MCs under their branch
-                    $mcQuery->whereHas('missionalCommunity', function($q) use ($user) {
+                    $mcQuery->whereHas('missionalCommunity', function ($q) use ($user) {
                         $q->where('branch_id', $user->branch_id);
                     });
                 } else {
@@ -128,7 +134,7 @@ class ChatController extends Controller
 
             // If no specific type, ensure user has access to the conversations
             if (!$type || $type === 'all') {
-                $query->where(function($q) use ($user) {
+                $query->where(function ($q) use ($user) {
                     $q->whereHas('participants', function ($subQ) use ($user) {
                         $subQ->where('user_id', $user->id)->whereNull('left_at');
                     });
@@ -275,6 +281,7 @@ class ChatController extends Controller
             'sender_id' => $user->id,
             'sender_name' => $user->name,
             'content' => $request->get('content'),
+            'client_id' => $request->get('client_id'),
             'type' => $request->get('type', 'text'),
             'status' => 'sent',
             'reply_to_id' => $request->get('reply_to_id'),
@@ -295,8 +302,125 @@ class ChatController extends Controller
                 'status' => $message->status,
                 'created_at' => $message->created_at,
                 'reply_to_id' => $message->reply_to_id,
+                // Echo client_id if client provided it so clients can reconcile
+                // optimistic messages with server-created records.
+                'client_id' => $request->get('client_id'),
             ],
         ]);
+    }
+
+    /**
+     * Update (edit) a message's content. Only the original sender may edit a
+     * message and only within 2 minutes of creation. Returns the updated message.
+     */
+    public function updateMessage(Request $request, $id): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'content' => 'required|string|max:5000',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        /** @var User $user */
+        $user = Auth::user();
+
+        $message = Message::find($id);
+        // Try to resolve by primary id first; if not found, attempt to find by
+        // client-generated id (optimistic id) passed either in the URL or body.
+        $message = Message::find($id) ?? Message::where('client_id', $id)->first();
+        if (!$message && $request->has('client_id')) {
+            $message = Message::where('client_id', $request->get('client_id'))->first();
+        }
+
+        if (!$message) {
+            return response()->json(['success' => false, 'message' => 'Message not found'], 404);
+        }
+
+        // Only sender can edit and only within 2 minutes
+        if ($message->sender_id !== $user->id) {
+            return response()->json(['success' => false, 'message' => 'Permission denied'], 403);
+        }
+
+        $createdAt = $message->created_at;
+        $now = now();
+        if ($now->diffInMinutes($createdAt) > 2) {
+            return response()->json(['success' => false, 'message' => 'Edit window expired'], 403);
+        }
+
+        $message->content = $request->get('content');
+        $message->updated_at = now();
+        $message->save();
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'id' => $message->id,
+                'conversation_id' => $message->conversation_id,
+                'sender_id' => $message->sender_id,
+                'sender_name' => $message->sender_name,
+                'content' => $message->content,
+                'type' => $message->type,
+                'status' => $message->status,
+                'created_at' => $message->created_at,
+                'updated_at' => $message->updated_at,
+                'client_id' => $message->client_id,
+            ],
+        ]);
+    }
+
+    /**
+     * Delete a message. The sender may delete at any time. Admins may delete any message.
+     */
+    public function deleteMessage(Request $request, $id): JsonResponse
+    {
+        /** @var User $user */
+        $user = Auth::user();
+
+        // Resolve by primary id or client-generated id (optimistic id)
+        $message = Message::find($id) ?? Message::where('client_id', $id)->first();
+        if (!$message && $request->has('client_id')) {
+            $message = Message::where('client_id', $request->get('client_id'))->first();
+        }
+
+        if (!$message) {
+            // Treat as success to simplify client behavior when message is
+            // already absent on the server (or not yet persisted).
+            return response()->json(['success' => true, 'message' => 'Message deleted'], 200);
+        }
+
+        // Permission checks
+        if ($message->sender_id === $user->id) {
+            // Sender can delete
+        } else if ($user->isSuperAdmin()) {
+            // Super admin can delete
+        } else if ($user->isBranchAdmin()) {
+            // Branch admin can delete if sender in same branch
+            $sender = $message->sender;
+            if (!$sender || $sender->branch_id !== $user->branch_id) {
+                return response()->json(['success' => false, 'message' => 'Permission denied'], 403);
+            }
+        } else if ($user->isMCLeader()) {
+            // MC leader can delete if sender in same MC
+            $sender = $message->sender;
+            if (!$sender || $sender->mc_id !== $user->mc_id) {
+                return response()->json(['success' => false, 'message' => 'Permission denied'], 403);
+            }
+        } else {
+            return response()->json(['success' => false, 'message' => 'Permission denied'], 403);
+        }
+
+        try {
+            $message->delete();
+            return response()->json(['success' => true, 'message' => 'Message deleted'], 200);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Failed to delete message'], 500);
+        }
     }
 
     /**
@@ -423,7 +547,8 @@ class ChatController extends Controller
             'name' => 'required|string|max:255',
             'description' => 'nullable|string|max:1000',
             'type' => 'required|in:individual,group,mc,branch,announcement',
-            'participant_ids' => 'required|array|min:1',
+            // participant_ids are required for group/individual types but optional for branch/mc/announcement
+            'participant_ids' => 'nullable|array',
             'participant_ids.*' => 'exists:users,id',
             'branch_id' => 'nullable|exists:branches,id',
             'mc_id' => 'nullable|exists:missional_communities,id',
@@ -440,6 +565,52 @@ class ChatController extends Controller
         /** @var User $user */
         $user = Auth::user();
 
+        // Permission checks based on conversation type
+        $type = $request->type;
+
+        // Only super admins can create announcement/global conversations
+        if ($type === 'announcement' && !$user->isSuperAdmin()) {
+            return response()->json(['success' => false, 'message' => 'Permission denied: only super admins can create global announcements'], 403);
+        }
+
+        // Branch conversations: only branch admins or super admin can create for a branch
+        if ($type === 'branch') {
+            $branchId = $request->branch_id;
+            if (!$branchId) {
+                return response()->json(['success' => false, 'message' => 'branch_id is required for branch conversations'], 422);
+            }
+            if (!($user->isSuperAdmin() || $user->isBranchAdmin())) {
+                return response()->json(['success' => false, 'message' => 'Permission denied: only branch admins or super admins can create branch conversations'], 403);
+            }
+            // If branch admin ensure they belong to the branch
+            if ($user->isBranchAdmin() && $user->branch_id !== (int) $branchId) {
+                return response()->json(['success' => false, 'message' => 'Permission denied: you can only create conversations for your own branch'], 403);
+            }
+        }
+
+        // MC conversations: only MC leaders, branch admins (for MCs in their branch), or super admins
+        if ($type === 'mc') {
+            $mcId = $request->mc_id;
+            if (!$mcId) {
+                return response()->json(['success' => false, 'message' => 'mc_id is required for mc conversations'], 422);
+            }
+            $canCreateMC = false;
+            if ($user->isSuperAdmin()) {
+                $canCreateMC = true;
+            } elseif ($user->isMCLeader() && $user->mc_id === (int) $mcId) {
+                $canCreateMC = true;
+            } elseif ($user->isBranchAdmin()) {
+                // allow branch admin if MC belongs to their branch
+                $mc = \App\Models\MC::find($mcId);
+                if ($mc && $mc->branch_id === $user->branch_id) {
+                    $canCreateMC = true;
+                }
+            }
+            if (!$canCreateMC) {
+                return response()->json(['success' => false, 'message' => 'Permission denied: cannot create MC conversation'], 403);
+            }
+        }
+
         $conversationData = [
             'name' => $request->name,
             'description' => $request->description,
@@ -455,18 +626,60 @@ class ChatController extends Controller
             $conversationData['mc_id'] = $request->mc_id;
         }
 
-        $conversation = Conversation::create($conversationData);
+        // Handle category-based conversations and permissions
+        if ($type === 'branch') {
+            $branchId = $request->branch_id;
+            // Use helper to get or create a branch conversation
+            $conversation = Conversation::getOrCreateBranchConversation($branchId);
 
-        // Add creator as admin participant
-        $conversation->addParticipant($user->id, [
-            'is_admin' => true,
-            'can_add_members' => true,
-        ]);
+            // Add all branch users as participants
+            $branchUsers = User::where('branch_id', $branchId)->get();
+            foreach ($branchUsers as $branchUser) {
+                if (!$conversation->participants()->where('user_id', $branchUser->id)->exists()) {
+                    $conversation->addParticipant($branchUser->id);
+                }
+            }
+        } elseif ($type === 'mc') {
+            $mcId = $request->mc_id;
+            $conversation = Conversation::getOrCreateMCConversation($mcId);
 
-        // Add other participants
-        foreach ($request->participant_ids as $participantId) {
-            if ($participantId != $user->id) {
-                $conversation->addParticipant($participantId);
+            // Add all MC members as participants
+            $mcUsers = User::where('mc_id', $mcId)->get();
+            foreach ($mcUsers as $mcUser) {
+                if (!$conversation->participants()->where('user_id', $mcUser->id)->exists()) {
+                    $conversation->addParticipant($mcUser->id);
+                }
+            }
+        } elseif ($type === 'announcement') {
+            // Global announcement: create a single announcement conversation
+            $conversation = Conversation::create($conversationData);
+
+            // Add all users as participants so announcements are visible to everyone
+            $allUsers = User::all();
+            foreach ($allUsers as $u) {
+                if (!$conversation->participants()->where('user_id', $u->id)->exists()) {
+                    $conversation->addParticipant($u->id);
+                }
+            }
+        } else {
+            // Group or individual: participant_ids must be provided
+            if (empty($request->participant_ids) || !is_array($request->participant_ids)) {
+                return response()->json(['success' => false, 'message' => 'participant_ids is required for group or individual conversations'], 422);
+            }
+
+            $conversation = Conversation::create($conversationData);
+
+            // Add creator as admin participant
+            $conversation->addParticipant($user->id, [
+                'is_admin' => true,
+                'can_add_members' => true,
+            ]);
+
+            // Add other participants
+            foreach ($request->participant_ids as $participantId) {
+                if ($participantId != $user->id) {
+                    $conversation->addParticipant($participantId);
+                }
             }
         }
 

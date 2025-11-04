@@ -101,6 +101,8 @@ dependencies:
   equatable: ^2.0.5
   # Utilities continued
   # (audio packages intentionally removed in this branch)
+  # Open and share files
+  open_file: ^3.2.1
 
 dev_dependencies:
   flutter_test:

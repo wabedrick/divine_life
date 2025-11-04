@@ -257,4 +257,46 @@ class SermonService {
       throw Exception('Error creating social media post: $e');
     }
   }
+
+  // Sermon CRUD operations
+  static Future<Sermon> updateSermon(
+    int id,
+    Map<String, dynamic> sermonData,
+  ) async {
+    try {
+      final data = await ApiService.put('/sermons/$id', data: sermonData);
+      return Sermon.fromJson(data);
+    } catch (e) {
+      throw Exception('Error updating sermon: $e');
+    }
+  }
+
+  static Future<void> deleteSermon(int id) async {
+    try {
+      await ApiService.delete('/sermons/$id');
+    } catch (e) {
+      throw Exception('Error deleting sermon: $e');
+    }
+  }
+
+  // Social Media CRUD operations
+  static Future<SocialMediaPost> updateSocialMediaPost(
+    int id,
+    Map<String, dynamic> postData,
+  ) async {
+    try {
+      final data = await ApiService.put('/social-media/$id', data: postData);
+      return SocialMediaPost.fromJson(data);
+    } catch (e) {
+      throw Exception('Error updating social media post: $e');
+    }
+  }
+
+  static Future<void> deleteSocialMediaPost(int id) async {
+    try {
+      await ApiService.delete('/social-media/$id');
+    } catch (e) {
+      throw Exception('Error deleting social media post: $e');
+    }
+  }
 }

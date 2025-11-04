@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/app_state_provider.dart';
 import '../../core/providers/dashboard_provider.dart';
+import '../../widgets/birthday_notifications_widget.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -145,11 +147,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // Welcome section removed for all user dashboards per request
                   _buildStatsCards(context, authProvider, dashboardProvider),
                   const SizedBox(height: 24),
+
+                  // Birthday notifications for leaders
+                  const BirthdayNotificationsWidget(),
+
                   _buildQuickActions(context, authProvider),
                   const SizedBox(height: 24),
                   _buildLatestAnnouncements(context, dashboardProvider),
                   const SizedBox(height: 24),
                   _buildLatestSermons(context, dashboardProvider),
+                  const SizedBox(height: 24),
+                  _buildLatestTikTokPost(context, dashboardProvider),
                   // Only show Recent Activities to Super Admins and Branch Admins
                   if (authProvider.isSuperAdmin ||
                       authProvider.isBranchAdmin) ...[
@@ -286,10 +294,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 () => context.goNamed('mcs'),
               ),
             if (authProvider.canCreateReports)
-              _buildStatCard(
+              _buildStatCardWithSubtitle(
                 context,
                 'Reports',
                 dashboardProvider.totalReports.toString(),
+                dashboardProvider.reportsPeriodText,
                 Icons.assessment,
                 () => context.goNamed('reports'),
               ),
@@ -307,6 +316,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Icons.announcement,
               () => context.goNamed('announcements'),
             ),
+            // MC Members card for all members who belong to an MC
+            if (authProvider.userMCId != null)
+              _buildStatCard(
+                context,
+                'MC Members',
+                dashboardProvider.totalMCMembers.toString(),
+                Icons.group,
+                () => context.goNamed('mc_members'),
+              ),
           ],
         ),
       ],
@@ -348,6 +366,59 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 style: Theme.of(context).textTheme.bodySmall,
                 textAlign: TextAlign.center,
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatCardWithSubtitle(
+    BuildContext context,
+    String title,
+    String value,
+    String subtitle,
+    IconData icon,
+    VoidCallback onTap,
+  ) {
+    return Card(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 28,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                value,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+              Text(
+                title,
+                style: Theme.of(context).textTheme.bodySmall,
+                textAlign: TextAlign.center,
+              ),
+              if (subtitle.isNotEmpty)
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 10,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
             ],
           ),
         ),
@@ -700,15 +771,233 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildLatestTikTokPost(
+    BuildContext context,
+    DashboardProvider dashboardProvider,
+  ) {
+    final latestPosts = dashboardProvider.latestTikTokPosts;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Latest TikTok Posts',
+          style: Theme.of(
+            context,
+          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: latestPosts.isEmpty
+                ? Column(
+                    children: [
+                      Text(
+                        'No TikTok posts available',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: () => context.goNamed('sermons'),
+                        child: const Text('Browse posts'),
+                      ),
+                    ],
+                  )
+                : Column(
+                    children: latestPosts.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final post = entry.value;
+                      return Column(
+                        children: [
+                          if (index > 0) const Divider(height: 24),
+                          InkWell(
+                            onTap: () async {
+                              // Open TikTok URL in browser
+                              final uri = Uri.parse(post.postUrl);
+                              if (await canLaunchUrl(uri)) {
+                                await launchUrl(
+                                  uri,
+                                  mode: LaunchMode.externalApplication,
+                                );
+                              }
+                            },
+                            child: Row(
+                              children: [
+                                // TikTok thumbnail or icon
+                                Container(
+                                  width: 60,
+                                  height: 60,
+                                  decoration: BoxDecoration(
+                                    color: Colors.black,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: post.thumbnailUrl != null
+                                      ? ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          child: Image.network(
+                                            post.thumbnailUrl!,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (c, e, st) =>
+                                                const Icon(
+                                                  Icons.video_library,
+                                                  color: Colors.white,
+                                                ),
+                                          ),
+                                        )
+                                      : const Icon(
+                                          Icons.video_library,
+                                          color: Colors.white,
+                                        ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        post.title,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                      ),
+                                      if (post.description != null) ...[
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          post.description!,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodyMedium
+                                              ?.copyWith(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .onSurface
+                                                    .withValues(alpha: 0.7),
+                                              ),
+                                        ),
+                                      ],
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.video_camera_front,
+                                            size: 16,
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.primary,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            'Watch on TikTok',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodySmall
+                                                ?.copyWith(
+                                                  color: Theme.of(
+                                                    context,
+                                                  ).colorScheme.primary,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Icon(
+                                  Icons.open_in_new,
+                                  color: Theme.of(context).colorScheme.onSurface
+                                      .withValues(alpha: 0.5),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      );
+                    }).toList(),
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
   String _formatAnnouncementDate(DateTime date) {
     final now = DateTime.now();
     final justNow = DateTime(now.year, now.month, now.day);
     final justDate = DateTime(date.year, date.month, date.day);
-    final difference = justDate.difference(justNow).inDays;
+    final difference = justNow.difference(justDate).inDays;
 
+    // Today
     if (difference == 0) return 'Today';
-    if (difference == 1) return 'Tomorrow';
-    return '${date.day}/${date.month}/${date.year}';
+
+    // Yesterday
+    if (difference == 1) return 'Yesterday';
+
+    // Within the last week - show day name
+    if (difference <= 7) {
+      const dayNames = [
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+        'Sunday',
+      ];
+      return dayNames[date.weekday - 1];
+    }
+
+    // More than a week ago - show full date in format: "12th Dec 2025"
+    return _formatFullDate(date);
+  }
+
+  String _formatFullDate(DateTime date) {
+    const monthNames = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+
+    String getDayWithSuffix(int day) {
+      if (day >= 11 && day <= 13) {
+        return '${day}th';
+      }
+      switch (day % 10) {
+        case 1:
+          return '${day}st';
+        case 2:
+          return '${day}nd';
+        case 3:
+          return '${day}rd';
+        default:
+          return '${day}th';
+      }
+    }
+
+    final dayWithSuffix = getDayWithSuffix(date.day);
+    final monthName = monthNames[date.month - 1];
+
+    return '$dayWithSuffix $monthName ${date.year}';
   }
 
   Widget _buildStatRow(
